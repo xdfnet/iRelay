@@ -1,2 +1,4 @@
-.DS_Store
 bin/
+/irelay
+*.log
+.DS_Store
