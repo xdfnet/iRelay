@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -571,10 +572,11 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 
 	reader := bufio.NewReader(upstream.Body)
 	messageID := ""
+	messageOutputIndex := -1
 	textStarted := false
 	accumulated := ""
-	output := []any{}
 	toolCalls := map[int]*streamToolCall{}
+	nextOutputIndex := 0
 
 	done := make(chan struct{})
 	go func() {
@@ -600,9 +602,11 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 							if !textStarted {
 								textStarted = true
 								messageID = "msg_" + randomID()
+								messageOutputIndex = nextOutputIndex
+								nextOutputIndex++
 								writeSSE(w, "response.output_item.added", map[string]any{
 									"type":         "response.output_item.added",
-									"output_index": 0,
+									"output_index": messageOutputIndex,
 									"item": map[string]any{
 										"id":      messageID,
 										"type":    "message",
@@ -614,7 +618,7 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 								writeSSE(w, "response.content_part.added", map[string]any{
 									"type":          "response.content_part.added",
 									"item_id":       messageID,
-									"output_index":  0,
+									"output_index":  messageOutputIndex,
 									"content_index": 0,
 									"part": map[string]any{
 										"type":        "output_text",
@@ -628,7 +632,7 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 							writeSSE(w, "response.output_text.delta", map[string]any{
 								"type":          "response.output_text.delta",
 								"item_id":       messageID,
-								"output_index":  0,
+								"output_index":  messageOutputIndex,
 								"content_index": 0,
 								"delta":         text,
 							})
@@ -640,9 +644,10 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 								toolCalls[call.Index] = &streamToolCall{
 									ID:          itemID,
 									CallID:      itemID,
-									OutputIndex: len(toolCalls) + 1,
+									OutputIndex: nextOutputIndex,
 									Name:        call.Name,
 								}
+								nextOutputIndex++
 								writeSSE(w, "response.output_item.added", map[string]any{
 									"type":         "response.output_item.added",
 									"output_index": toolCalls[call.Index].OutputIndex,
@@ -687,6 +692,8 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 	}
 	close(done)
 
+	outputItems := map[int]any{}
+
 	if textStarted {
 		messageItem := map[string]any{
 			"id":     messageID,
@@ -702,29 +709,31 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 		writeSSE(w, "response.output_text.done", map[string]any{
 			"type":          "response.output_text.done",
 			"item_id":       messageID,
-			"output_index":  0,
+			"output_index":  messageOutputIndex,
 			"content_index": 0,
 			"text":          accumulated,
 		})
 		writeSSE(w, "response.content_part.done", map[string]any{
 			"type":          "response.content_part.done",
 			"item_id":       messageID,
-			"output_index":  0,
+			"output_index":  messageOutputIndex,
 			"content_index": 0,
 			"part":          messageItem["content"].([]any)[0],
 		})
 		writeSSE(w, "response.output_item.done", map[string]any{
 			"type":         "response.output_item.done",
-			"output_index": 0,
+			"output_index": messageOutputIndex,
 			"item":         messageItem,
 		})
-		output = append(output, messageItem)
+		outputItems[messageOutputIndex] = messageItem
 	}
 
-	for _, call := range toolCalls {
+	for _, call := range sortedStreamToolCalls(toolCalls) {
 		writeSSE(w, "response.function_call_arguments.done", map[string]any{
 			"type":         "response.function_call_arguments.done",
+			"call_id":      call.CallID,
 			"item_id":      call.ID,
+			"name":         call.Name,
 			"output_index": call.OutputIndex,
 			"arguments":    call.Arguments,
 		})
@@ -741,8 +750,9 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 			"output_index": call.OutputIndex,
 			"item":         callItem,
 		})
-		output = append(output, callItem)
+		outputItems[call.OutputIndex] = callItem
 	}
+	output := sortedOutputItems(outputItems)
 
 	writeSSE(w, "response.completed", map[string]any{
 		"type": "response.completed",
@@ -771,6 +781,31 @@ type streamToolDelta struct {
 	ID        string
 	Name      string
 	Arguments string
+}
+
+func sortedStreamToolCalls(calls map[int]*streamToolCall) []*streamToolCall {
+	sorted := make([]*streamToolCall, 0, len(calls))
+	for _, call := range calls {
+		sorted = append(sorted, call)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].OutputIndex < sorted[j].OutputIndex
+	})
+	return sorted
+}
+
+func sortedOutputItems(items map[int]any) []any {
+	indexes := make([]int, 0, len(items))
+	for index := range items {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	output := make([]any, 0, len(indexes))
+	for _, index := range indexes {
+		output = append(output, items[index])
+	}
+	return output
 }
 
 func firstChoiceMessage(chat map[string]any) map[string]any {
