@@ -1,8 +1,27 @@
 # iRelay
 
+[![Version](https://img.shields.io/badge/version-v0.1.0-0f766e)](./VERSION)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](./go.mod)
+[![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![Dependencies](https://img.shields.io/badge/dependencies-zero-success)](./go.mod)
+
+> 小而稳的 Codex -> DeepSeek 本机中转服务。
+
 iRelay 是一个很小的本机中转服务，让 Codex 可以通过 OpenAI Responses API 的形态使用 DeepSeek。
 
 它运行在你的机器上，只暴露 Codex 需要的最小接口，并把请求转发到 DeepSeek Chat Completions。不做控制台、不做数据库、不做多供应商平台，也不引入额外运行时。
+
+## 项目卡片
+
+| 项目 | 内容 |
+| --- | --- |
+| 当前版本 | `v0.1.0` |
+| 目标用户 | 想用 Codex + DeepSeek 的个人开发者 |
+| 中转链路 | `Codex Responses -> iRelay -> DeepSeek Chat Completions` |
+| 运行方式 | 本机 HTTP 服务 |
+| 默认地址 | `http://localhost:8787` |
+| 依赖 | Go 标准库，无第三方依赖 |
+| 开源协议 | MIT |
 
 ## 为什么需要
 
@@ -85,6 +104,7 @@ irelay
 验证：
 
 ```bash
+irelay --version
 curl http://localhost:8787/health
 curl http://localhost:8787/v1/models
 ```

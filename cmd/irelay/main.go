@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"time"
 )
 
+const appVersion = "0.1.0"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
@@ -25,6 +27,14 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-v", "--version", "version":
+			fmt.Printf("iRelay v%s\n", appVersion)
+			return
+		}
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatal(err)
