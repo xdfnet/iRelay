@@ -49,7 +49,6 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 	messageOutputIndex := -1
 	textStarted := false
 	accumulated := ""
-	accumulatedReasoning := ""
 	toolCalls := map[int]*streamToolCall{}
 	nextOutputIndex := 0
 	deepseekEvents := []map[string]any{}
@@ -114,10 +113,6 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 							})
 						}
 
-						if rc := anyToString(delta["reasoning_content"]); rc != "" {
-							accumulatedReasoning += rc
-						}
-
 						for _, call := range streamToolDeltas(delta) {
 							if _, ok := toolCalls[call.Index]; !ok {
 								itemID := firstNonEmpty(call.ID, "call_"+randomID())
@@ -175,7 +170,7 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 
 	outputItems := map[int]any{}
 
-	if textStarted || accumulatedReasoning != "" {
+	if textStarted {
 		messageItem := map[string]any{
 			"id":     messageID,
 			"type":   "message",
@@ -186,9 +181,6 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 				"text":        accumulated,
 				"annotations": []any{},
 			}},
-		}
-		if accumulatedReasoning != "" {
-			messageItem["reasoning_content"] = accumulatedReasoning
 		}
 		writeSSE(w, "response.output_text.done", map[string]any{
 			"type":          "response.output_text.done",

@@ -321,7 +321,7 @@ func TestApplyDeepSeekChatTweaksDisablesThinking(t *testing.T) {
 	}
 }
 
-func TestResponsesToChatPayloadPreservesReasoningContent(t *testing.T) {
+func TestResponsesToChatPayloadPreservesInputText(t *testing.T) {
 	body := responsesRequest{
 		Model: defaultModel,
 		Input: []any{
@@ -349,80 +349,3 @@ func TestResponsesToChatPayloadPreservesReasoningContent(t *testing.T) {
 	}
 }
 
-func TestReasoningContentRoundTrip(t *testing.T) {
-	// Simulate a DeepSeek chat completion WITH reasoning_content
-	chatResp := map[string]any{
-		"model": "deepseek-v4-pro",
-		"choices": []any{
-			map[string]any{
-				"message": map[string]any{
-					"role":              "assistant",
-					"content":           "答案是 2",
-					"reasoning_content": "让我想想...1+1等于2",
-				},
-			},
-		},
-	}
-
-	// Step 1: DeepSeek response -> iRelay response
-	resp := chatCompletionToResponse(chatResp, "deepseek-v4-pro")
-	output := resp["output"].([]any)
-	msgItem := output[0].(map[string]any)
-	rc, hasRC := msgItem["reasoning_content"]
-	if !hasRC {
-		t.Fatal("chatCompletionToResponse should preserve reasoning_content in output")
-	}
-	if rc != "让我想想...1+1等于2" {
-		t.Fatalf("reasoning_content = %q, want %q", rc, "让我想想...1+1等于2")
-	}
-
-	// Step 2: iRelay response -> DeepSeek chat request (next turn via Codex)
-	body := responsesRequest{
-		Model: "deepseek-v4-pro",
-		Input: []any{msgItem},
-	}
-	payload, err := responsesToChatPayload(body)
-	if err != nil {
-		t.Fatalf("responsesToChatPayload error: %v", err)
-	}
-	messages := payload["messages"].([]chatMessage)
-	lastMsg := messages[len(messages)-1]
-	if lastMsg.ReasoningContent == "" {
-		t.Fatal("responseItemToChatMessage should preserve reasoning_content in chat message")
-	}
-	if lastMsg.ReasoningContent != "让我想想...1+1等于2" {
-		t.Fatalf("ReasoningContent = %q, want %q", lastMsg.ReasoningContent, "让我想想...1+1等于2")
-	}
-}
-
-func TestReasoningContentStreamingItem(t *testing.T) {
-	// Verify streaming path includes reasoning_content in messageItem when present
-	accumulated := "hi"
-	accumulatedReasoning := "thinking..."
-	textStarted := true
-
-	outputItems := map[int]any{}
-	if textStarted || accumulatedReasoning != "" {
-		messageItem := map[string]any{
-			"id":     "msg_test",
-			"type":   "message",
-			"status": "completed",
-			"role":   "assistant",
-			"content": []any{map[string]any{
-				"type":        "output_text",
-				"text":        accumulated,
-				"annotations": []any{},
-			}},
-		}
-		if accumulatedReasoning != "" {
-			messageItem["reasoning_content"] = accumulatedReasoning
-		}
-		outputItems[0] = messageItem
-	}
-
-	item := outputItems[0].(map[string]any)
-	rc := anyToString(item["reasoning_content"])
-	if rc != "thinking..." {
-		t.Fatalf("streaming reasoning_content = %q, want %q", rc, "thinking...")
-	}
-}
