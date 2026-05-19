@@ -1,6 +1,6 @@
 # iRelay
 
-[![Version](https://img.shields.io/badge/version-v0.2.1-0f766e)](./VERSION)
+[![Version](https://img.shields.io/badge/version-v1.0.0-0f766e)](./package.json)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](./go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-success)](./go.mod)
@@ -15,7 +15,7 @@ iRelay 是一个很小的本机中转服务，让 Codex 可以通过 OpenAI Resp
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前版本 | `v0.2.1` |
+| 当前版本 | `v1.0.0` |
 | 目标用户 | 想用 Codex + DeepSeek 的个人开发者 |
 | 中转链路 | `Codex Responses -> iRelay -> DeepSeek Chat Completions` |
 | 运行方式 | 本机 HTTP 服务 |
