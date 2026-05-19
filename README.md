@@ -1,6 +1,6 @@
 # iRelay
 
-[![Version](https://img.shields.io/badge/version-v0.2.0-0f766e)](./VERSION)
+[![Version](https://img.shields.io/badge/version-v0.2.1-0f766e)](./VERSION)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](./go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-success)](./go.mod)
@@ -15,7 +15,7 @@ iRelay 是一个很小的本机中转服务，让 Codex 可以通过 OpenAI Resp
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前版本 | `v0.2.0` |
+| 当前版本 | `v0.2.1` |
 | 目标用户 | 想用 Codex + DeepSeek 的个人开发者 |
 | 中转链路 | `Codex Responses -> iRelay -> DeepSeek Chat Completions` |
 | 运行方式 | 本机 HTTP 服务 |
@@ -83,11 +83,19 @@ iRelay 暴露：
 
 ## 快速开始
 
-安装：
+通过 npm 安装：
+
+```bash
+npm install -g @xdfnet/irelay
+```
+
+也可以从源码安装：
 
 ```bash
 make install
 ```
+
+npm 安装会在本机用 Go 编译 iRelay，需要提前安装 Go。
 
 设置 DeepSeek API Key：
 

@@ -1,4 +1,6 @@
-bin/
+/bin/irelay
+/bin/irelay.exe
+dist/
 /irelay
 *.log
 .DS_Store

@@ -239,13 +239,9 @@ func runDoctor(w io.Writer) error {
 	reportEnv(w, "DEEPSEEK_API_KEY")
 	reportEnv(w, "IRELAY_API_KEY")
 
-	home, err := os.UserHomeDir()
+	_, configPath, err := codexConfigPath()
 	if err != nil {
 		return err
-	}
-	configPath := strings.TrimSpace(os.Getenv("CODEX_CONFIG"))
-	if configPath == "" {
-		configPath = filepath.Join(home, ".codex", "config.toml")
 	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
@@ -269,13 +265,6 @@ func runDoctor(w io.Writer) error {
 	return nil
 }
 
-func onOff(ok bool) string {
-	if ok {
-		return "on"
-	}
-	return "off"
-}
-
 func reportEnv(w io.Writer, name string) {
 	_, ok := os.LookupEnv(name)
 	fmt.Fprintf(w, "%s: %s\n", name, statusLine(ok))
@@ -286,4 +275,11 @@ func statusLine(ok bool) string {
 		return "ok"
 	}
 	return "missing"
+}
+
+func onOff(ok bool) string {
+	if ok {
+		return "on"
+	}
+	return "off"
 }
