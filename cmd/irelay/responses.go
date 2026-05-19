@@ -118,14 +118,26 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 	case string:
 		messages = append(messages, chatMessage{Role: "user", Content: input})
 	case []any:
-		for _, raw := range input {
-			item, ok := raw.(map[string]any)
+		i := 0
+		for i < len(input) {
+			item, ok := input[i].(map[string]any)
 			if !ok {
+				i++
 				continue
 			}
-			message, ok := responseItemToChatMessage(item)
-			if ok {
-				messages = append(messages, message)
+			if anyToString(item["type"]) == "function_call" {
+				toolCalls := collectFunctionCalls(input, &i)
+				if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" && len(messages[len(messages)-1].ToolCalls) == 0 {
+					messages[len(messages)-1].ToolCalls = toolCalls
+				} else {
+					messages = append(messages, chatMessage{Role: "assistant", Content: "", ToolCalls: toolCalls})
+				}
+			} else {
+				i++
+				message, ok := responseItemToChatMessage(item)
+				if ok {
+					messages = append(messages, message)
+				}
 			}
 		}
 	case nil:
@@ -135,6 +147,27 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 	}
 
 	return messages, nil
+}
+
+func collectFunctionCalls(input []any, i *int) []toolCall {
+	var toolCalls []toolCall
+	for *i < len(input) {
+		item, ok := input[*i].(map[string]any)
+		if !ok || anyToString(item["type"]) != "function_call" {
+			break
+		}
+		callID := firstNonEmpty(anyToString(item["call_id"]), anyToString(item["id"]), "call_"+randomID())
+		toolCalls = append(toolCalls, toolCall{
+			ID:   callID,
+			Type: "function",
+			Function: functionCall{
+				Name:      anyToString(item["name"]),
+				Arguments: firstNonEmpty(anyToString(item["arguments"]), "{}"),
+			},
+		})
+		*i++
+	}
+	return toolCalls
 }
 
 func responseItemToChatMessage(item map[string]any) (chatMessage, bool) {
