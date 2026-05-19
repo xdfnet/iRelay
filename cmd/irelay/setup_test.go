@@ -20,7 +20,23 @@ url = "https://developers.openai.com/mcp"
 	}
 }
 
-func TestConfigureCodexTOMLRemovesBadNestedModelKeys(t *testing.T) {
+func TestConfigureCodexTOMLRemovesTopLevelModelKeys(t *testing.T) {
+	got := configureCodexTOML(`model_provider = "openai"
+model = "gpt-5.4"
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+`)
+
+	if strings.Count(got, `model_provider = "irelay"`) != 1 {
+		t.Fatalf("top-level provider was not replaced exactly once:\n%s", got)
+	}
+	if strings.Contains(got, `model_provider = "openai"`) || strings.Contains(got, `model = "gpt-5.4"`) {
+		t.Fatalf("old top-level model keys were not removed:\n%s", got)
+	}
+}
+
+func TestConfigureCodexTOMLPreservesNestedModelKeys(t *testing.T) {
 	got := configureCodexTOML(`[mcp_servers.openaiDeveloperDocs]
 url = "https://developers.openai.com/mcp"
 model_provider = "irelay"
@@ -32,8 +48,8 @@ model = "deepseek-v4-pro"
 	if nextTable := strings.Index(mcpBlock[len("[mcp_servers.openaiDeveloperDocs]"):], "\n["); nextTable >= 0 {
 		mcpBlock = mcpBlock[:len("[mcp_servers.openaiDeveloperDocs]")+nextTable]
 	}
-	if strings.Contains(mcpBlock, "model_provider") || strings.Contains(mcpBlock, "\nmodel =") {
-		t.Fatalf("nested model keys were not removed:\n%s", got)
+	if !strings.Contains(mcpBlock, `model_provider = "irelay"`) || !strings.Contains(mcpBlock, `model = "deepseek-v4-pro"`) {
+		t.Fatalf("nested model keys were not preserved:\n%s", got)
 	}
 }
 
@@ -166,5 +182,37 @@ func TestSwitchCodexOnOffStatus(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "[model_providers.irelay]") {
 		t.Fatalf("off should preserve provider block:\n%s", string(raw))
+	}
+}
+
+func TestRunDoctorChecksCodexTopLevelModel(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_CONFIG", configPath)
+
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[profiles.deep-review]
+model_provider = "irelay"
+model = "deepseek-v4-pro"
+
+[model_providers.irelay]
+name = "iRelay"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var out strings.Builder
+	if err := runDoctor(&out); err != nil {
+		t.Fatalf("runDoctor returned error: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "Codex provider: missing") || !strings.Contains(text, "Codex model: missing") {
+		t.Fatalf("doctor should only accept top-level Codex model settings:\n%s", text)
+	}
+	if !strings.Contains(text, "iRelay provider block: ok") {
+		t.Fatalf("doctor should still find provider block:\n%s", text)
 	}
 }

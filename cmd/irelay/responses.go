@@ -152,22 +152,6 @@ func responseItemToChatMessage(item map[string]any) (chatMessage, bool) {
 	itemType := anyToString(item["type"])
 	role := normalizeRole(anyToString(item["role"]))
 
-	if itemType == "function_call" {
-		callID := firstNonEmpty(anyToString(item["call_id"]), anyToString(item["id"]), "call_"+randomID())
-		return chatMessage{
-			Role:    "assistant",
-			Content: "",
-			ToolCalls: []toolCall{{
-				ID:   callID,
-				Type: "function",
-				Function: functionCall{
-					Name:      anyToString(item["name"]),
-					Arguments: firstNonEmpty(anyToString(item["arguments"]), "{}"),
-				},
-			}},
-		}, true
-	}
-
 	if itemType == "function_call_output" {
 		return chatMessage{
 			Role:       "tool",

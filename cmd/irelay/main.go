@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.2.0"
+const appVersion = "1.2.1"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"

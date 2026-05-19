@@ -179,7 +179,7 @@ func removeCodexTopLevelModel(toml string) string {
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			currentTable = strings.Trim(trimmed, "[]")
 		}
-		if isCodexModelKey(trimmed) && shouldRemoveCodexModelKey(currentTable) {
+		if currentTable == "" && isCodexModelKey(trimmed) {
 			continue
 		}
 		out = append(out, line)
@@ -220,10 +220,6 @@ func isCodexModelKey(line string) bool {
 	return strings.HasPrefix(line, "model_provider") || strings.HasPrefix(line, "model ")
 }
 
-func shouldRemoveCodexModelKey(table string) bool {
-	return table == "" || (!strings.HasPrefix(table, "profiles.") && !strings.HasPrefix(table, "model_providers."))
-}
-
 func hasTable(toml, table string) bool {
 	target := "[" + table + "]"
 	for _, line := range strings.Split(toml, "\n") {
@@ -249,8 +245,8 @@ func runDoctor(w io.Writer) error {
 	} else {
 		content := string(raw)
 		fmt.Fprintf(w, "Codex config: %s\n", configPath)
-		fmt.Fprintf(w, "Codex provider: %s\n", statusLine(strings.Contains(content, `model_provider = "irelay"`)))
-		fmt.Fprintf(w, "Codex model: %s\n", statusLine(strings.Contains(content, `model = "deepseek-v4-pro"`)))
+		fmt.Fprintf(w, "Codex provider: %s\n", statusLine(hasTopLevelAssignment(content, "model_provider", "irelay")))
+		fmt.Fprintf(w, "Codex model: %s\n", statusLine(hasTopLevelAssignment(content, "model", "deepseek-v4-pro")))
 		fmt.Fprintf(w, "iRelay provider block: %s\n", statusLine(hasTable(content, "model_providers.irelay")))
 	}
 
