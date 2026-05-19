@@ -111,6 +111,25 @@ curl http://localhost:8787/v1/models
 
 ## 配置 Codex
 
+可以用内置命令自动写入 Codex provider 配置：
+
+```bash
+make setup-codex
+```
+
+它会：
+
+- 写入 `~/.codex/config.toml` 里的 `irelay` provider
+- 设置默认 `model_provider = "irelay"`
+- 设置默认模型 `deepseek-v4-pro`
+- 向 `~/.zshrc` 追加 `IRELAY_API_KEY=1`
+
+它不会写入 `DEEPSEEK_API_KEY`。DeepSeek API Key 仍建议你自己手动放进本机 shell 环境：
+
+```bash
+echo 'export DEEPSEEK_API_KEY="你的 DeepSeek API Key"' >> ~/.zshrc
+```
+
 临时使用：
 
 ```bash
@@ -134,7 +153,7 @@ env_key = "IRELAY_API_KEY"
 wire_api = "responses"
 ```
 
-持久化环境变量：
+如果不用 `make setup-codex`，也可以手动持久化环境变量：
 
 ```bash
 echo 'export DEEPSEEK_API_KEY="你的 DeepSeek API Key"' >> ~/.zshrc
