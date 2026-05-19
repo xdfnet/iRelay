@@ -28,14 +28,6 @@ func TestResponsesToChatPayloadStringInput(t *testing.T) {
 		t.Fatalf("temperature = %v, want %v", payload["temperature"], temperature)
 	}
 
-	thinking, ok := payload["thinking"].(map[string]string)
-	if !ok {
-		t.Fatalf("thinking has type %T, want map[string]string", payload["thinking"])
-	}
-	if thinking["type"] != "disabled" {
-		t.Fatalf("thinking.type = %q, want disabled", thinking["type"])
-	}
-
 	messages := payload["messages"].([]chatMessage)
 	if len(messages) != 2 {
 		t.Fatalf("messages length = %d, want 2", len(messages))
@@ -311,7 +303,7 @@ func TestResponsesToChatPayloadMergeAssistantTextAndFunctionCall(t *testing.T) {
 	}
 }
 
-func TestApplyDeepSeekChatTweaksDisablesThinkingAndPreservesPayload(t *testing.T) {
+func TestApplyDeepSeekChatTweaksPreservesPayload(t *testing.T) {
 	payload := map[string]any{
 		"messages":   []chatMessage{{Role: "user", Content: "hi"}},
 		"tools":      []map[string]any{{"type": "function"}},
@@ -323,25 +315,20 @@ func TestApplyDeepSeekChatTweaksDisablesThinkingAndPreservesPayload(t *testing.T
 	if payload["messages"] == nil || payload["tools"] == nil || payload["max_tokens"] != 128 {
 		t.Fatalf("payload fields were not preserved: %#v", payload)
 	}
-	thinking, ok := payload["thinking"].(map[string]string)
-	if !ok || thinking["type"] != "disabled" {
-		t.Fatalf("thinking = %#v, want disabled", payload["thinking"])
-	}
+	// thinking is no longer forced to "disabled"; let DeepSeek decide.
 }
 
-func TestResponsesToChatPayloadStripsReasoningContent(t *testing.T) {
+func TestResponsesToChatPayloadPreservesReasoningContent(t *testing.T) {
 	body := responsesRequest{
 		Model: defaultModel,
 		Input: []any{
 			map[string]any{
 				"type":              "message",
 				"role":              "user",
-				"reasoning_content": "hidden top-level",
 				"content": []any{
 					map[string]any{
-						"type":              "input_text",
-						"text":              "visible",
-						"reasoning_content": "hidden nested",
+						"type": "input_text",
+						"text": "visible",
 					},
 				},
 			},

@@ -45,7 +45,6 @@ type functionCall struct {
 }
 
 func responsesToChatPayload(body responsesRequest) (map[string]any, error) {
-	body.Input = stripReasoningContentFromInput(body.Input)
 	messages, err := responsesInputToMessages(body)
 	if err != nil {
 		return nil, err
@@ -73,31 +72,8 @@ func responsesToChatPayload(body responsesRequest) (map[string]any, error) {
 }
 
 func applyDeepSeekChatTweaks(payload map[string]any) {
-	payload["thinking"] = map[string]string{"type": "disabled"}
+	// Thinking is always enabled for DeepSeek V4 Pro.
 }
-
-func stripReasoningContentFromInput(input any) any {
-	switch value := input.(type) {
-	case []any:
-		cleaned := make([]any, len(value))
-		for i, item := range value {
-			cleaned[i] = stripReasoningContentFromInput(item)
-		}
-		return cleaned
-	case map[string]any:
-		cleaned := make(map[string]any, len(value))
-		for key, item := range value {
-			if key == "reasoning_content" {
-				continue
-			}
-			cleaned[key] = stripReasoningContentFromInput(item)
-		}
-		return cleaned
-	default:
-		return input
-	}
-}
-
 func (body responsesRequest) modelOrDefault() string {
 	if body.Model == defaultModel || body.Model == fallbackModel {
 		return body.Model
@@ -146,6 +122,7 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 		return nil, errors.New("`input` must be a string or an array")
 	}
 
+	messages = ensureToolAfterAssistant(messages)
 	return messages, nil
 }
 
@@ -339,4 +316,44 @@ func chatCompletionToResponse(chat map[string]any, model string) map[string]any 
 	}
 
 	return response
+}
+
+// ensureToolAfterAssistant re-orders messages so that every assistant message
+// with tool_calls is immediately followed by the corresponding tool messages.
+// DeepSeek requires this; Codex sometimes injects system messages in between.
+func ensureToolAfterAssistant(messages []chatMessage) []chatMessage {
+	reordered := make([]chatMessage, 0, len(messages))
+	i := 0
+	for i < len(messages) {
+		msg := messages[i]
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			expectedSet := make(map[string]bool)
+			for _, tc := range msg.ToolCalls {
+				expectedSet[tc.ID] = true
+			}
+			var toolMsgs []chatMessage
+			var nonToolMsgs []chatMessage
+			j := i + 1
+			for j < len(messages) && len(expectedSet) > 0 {
+				nxt := messages[j]
+				if nxt.Role == "tool" && expectedSet[nxt.ToolCallID] {
+					delete(expectedSet, nxt.ToolCallID)
+					toolMsgs = append(toolMsgs, nxt)
+				} else if nxt.Role == "system" || nxt.Role == "developer" {
+					nonToolMsgs = append(nonToolMsgs, nxt)
+				} else {
+					break
+				}
+				j++
+			}
+			reordered = append(reordered, nonToolMsgs...)
+			reordered = append(reordered, msg)
+			reordered = append(reordered, toolMsgs...)
+			i = j
+		} else {
+			reordered = append(reordered, msg)
+			i++
+		}
+	}
+	return reordered
 }
