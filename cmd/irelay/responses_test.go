@@ -303,7 +303,7 @@ func TestResponsesToChatPayloadMergeAssistantTextAndFunctionCall(t *testing.T) {
 	}
 }
 
-func TestApplyDeepSeekChatTweaksPreservesPayload(t *testing.T) {
+func TestApplyDeepSeekChatTweaksDisablesThinking(t *testing.T) {
 	payload := map[string]any{
 		"messages":   []chatMessage{{Role: "user", Content: "hi"}},
 		"tools":      []map[string]any{{"type": "function"}},
@@ -315,7 +315,10 @@ func TestApplyDeepSeekChatTweaksPreservesPayload(t *testing.T) {
 	if payload["messages"] == nil || payload["tools"] == nil || payload["max_tokens"] != 128 {
 		t.Fatalf("payload fields were not preserved: %#v", payload)
 	}
-	// thinking is no longer forced to "disabled"; let DeepSeek decide.
+	thinking, ok := payload["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("thinking should be disabled, got %#v", payload["thinking"])
+	}
 }
 
 func TestResponsesToChatPayloadPreservesReasoningContent(t *testing.T) {
@@ -343,5 +346,83 @@ func TestResponsesToChatPayloadPreservesReasoningContent(t *testing.T) {
 	messages := payload["messages"].([]chatMessage)
 	if len(messages) != 1 || messages[0].Content != "visible" {
 		t.Fatalf("messages = %#v, want visible text only", messages)
+	}
+}
+
+func TestReasoningContentRoundTrip(t *testing.T) {
+	// Simulate a DeepSeek chat completion WITH reasoning_content
+	chatResp := map[string]any{
+		"model": "deepseek-v4-pro",
+		"choices": []any{
+			map[string]any{
+				"message": map[string]any{
+					"role":              "assistant",
+					"content":           "答案是 2",
+					"reasoning_content": "让我想想...1+1等于2",
+				},
+			},
+		},
+	}
+
+	// Step 1: DeepSeek response -> iRelay response
+	resp := chatCompletionToResponse(chatResp, "deepseek-v4-pro")
+	output := resp["output"].([]any)
+	msgItem := output[0].(map[string]any)
+	rc, hasRC := msgItem["reasoning_content"]
+	if !hasRC {
+		t.Fatal("chatCompletionToResponse should preserve reasoning_content in output")
+	}
+	if rc != "让我想想...1+1等于2" {
+		t.Fatalf("reasoning_content = %q, want %q", rc, "让我想想...1+1等于2")
+	}
+
+	// Step 2: iRelay response -> DeepSeek chat request (next turn via Codex)
+	body := responsesRequest{
+		Model: "deepseek-v4-pro",
+		Input: []any{msgItem},
+	}
+	payload, err := responsesToChatPayload(body)
+	if err != nil {
+		t.Fatalf("responsesToChatPayload error: %v", err)
+	}
+	messages := payload["messages"].([]chatMessage)
+	lastMsg := messages[len(messages)-1]
+	if lastMsg.ReasoningContent == "" {
+		t.Fatal("responseItemToChatMessage should preserve reasoning_content in chat message")
+	}
+	if lastMsg.ReasoningContent != "让我想想...1+1等于2" {
+		t.Fatalf("ReasoningContent = %q, want %q", lastMsg.ReasoningContent, "让我想想...1+1等于2")
+	}
+}
+
+func TestReasoningContentStreamingItem(t *testing.T) {
+	// Verify streaming path includes reasoning_content in messageItem when present
+	accumulated := "hi"
+	accumulatedReasoning := "thinking..."
+	textStarted := true
+
+	outputItems := map[int]any{}
+	if textStarted || accumulatedReasoning != "" {
+		messageItem := map[string]any{
+			"id":     "msg_test",
+			"type":   "message",
+			"status": "completed",
+			"role":   "assistant",
+			"content": []any{map[string]any{
+				"type":        "output_text",
+				"text":        accumulated,
+				"annotations": []any{},
+			}},
+		}
+		if accumulatedReasoning != "" {
+			messageItem["reasoning_content"] = accumulatedReasoning
+		}
+		outputItems[0] = messageItem
+	}
+
+	item := outputItems[0].(map[string]any)
+	rc := anyToString(item["reasoning_content"])
+	if rc != "thinking..." {
+		t.Fatalf("streaming reasoning_content = %q, want %q", rc, "thinking...")
 	}
 }

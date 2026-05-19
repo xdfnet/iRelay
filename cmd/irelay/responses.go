@@ -27,10 +27,11 @@ type responseTool struct {
 }
 
 type chatMessage struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	ToolCalls        []toolCall `json:"tool_calls,omitempty"`
 }
 
 type toolCall struct {
@@ -72,7 +73,7 @@ func responsesToChatPayload(body responsesRequest) (map[string]any, error) {
 }
 
 func applyDeepSeekChatTweaks(payload map[string]any) {
-	// Thinking is always enabled for DeepSeek V4 Pro.
+	payload["thinking"] = map[string]any{"type": "disabled"}
 }
 func (body responsesRequest) modelOrDefault() string {
 	if body.Model == defaultModel || body.Model == fallbackModel {
@@ -102,11 +103,14 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 				continue
 			}
 			if anyToString(item["type"]) == "function_call" {
-				toolCalls := collectFunctionCalls(input, &i)
+				toolCalls, reasoning := collectFunctionCalls(input, &i)
 				if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" && len(messages[len(messages)-1].ToolCalls) == 0 {
 					messages[len(messages)-1].ToolCalls = toolCalls
+					if reasoning != "" && messages[len(messages)-1].ReasoningContent == "" {
+						messages[len(messages)-1].ReasoningContent = reasoning
+						}
 				} else {
-					messages = append(messages, chatMessage{Role: "assistant", Content: "", ToolCalls: toolCalls})
+					messages = append(messages, chatMessage{Role: "assistant", Content: "", ToolCalls: toolCalls, ReasoningContent: reasoning})
 				}
 			} else {
 				i++
@@ -126,12 +130,16 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 	return messages, nil
 }
 
-func collectFunctionCalls(input []any, i *int) []toolCall {
+func collectFunctionCalls(input []any, i *int) ([]toolCall, string) {
 	var toolCalls []toolCall
+	var reasoning string
 	for *i < len(input) {
 		item, ok := input[*i].(map[string]any)
 		if !ok || anyToString(item["type"]) != "function_call" {
 			break
+		}
+		if reasoning == "" {
+			reasoning = anyToString(item["reasoning_content"])
 		}
 		callID := firstNonEmpty(anyToString(item["call_id"]), anyToString(item["id"]), "call_"+randomID())
 		toolCalls = append(toolCalls, toolCall{
@@ -144,7 +152,7 @@ func collectFunctionCalls(input []any, i *int) []toolCall {
 		})
 		*i++
 	}
-	return toolCalls
+	return toolCalls, reasoning
 }
 
 func responseItemToChatMessage(item map[string]any) (chatMessage, bool) {
@@ -183,7 +191,11 @@ func responseItemToChatMessage(item map[string]any) (chatMessage, bool) {
 		if role == "" {
 			role = "user"
 		}
-		return chatMessage{Role: role, Content: contentToText(item["content"])}, true
+		return chatMessage{
+				Role:             role,
+				Content:          contentToText(item["content"]),
+				ReasoningContent: anyToString(item["reasoning_content"]),
+			}, true
 	}
 
 	if text := anyToString(item["text"]); text != "" {
@@ -264,19 +276,23 @@ func chatCompletionToResponse(chat map[string]any, model string) map[string]any 
 	text := anyToString(message["content"])
 	output := []any{}
 
-	if text != "" {
-		output = append(output, map[string]any{
-			"id":     "msg_" + randomID(),
-			"type":   "message",
-			"status": "completed",
-			"role":   "assistant",
-			"content": []any{map[string]any{
-				"type":        "output_text",
-				"text":        text,
-				"annotations": []any{},
-			}},
-		})
-	}
+	if text != "" || anyToString(message["reasoning_content"]) != "" {
+			msgItem := map[string]any{
+				"id":     "msg_" + randomID(),
+				"type":   "message",
+				"status": "completed",
+				"role":   "assistant",
+				"content": []any{map[string]any{
+					"type":        "output_text",
+					"text":        text,
+					"annotations": []any{},
+				}},
+			}
+			if rc := anyToString(message["reasoning_content"]); rc != "" {
+				msgItem["reasoning_content"] = rc
+			}
+			output = append(output, msgItem)
+		}
 
 	if calls, ok := message["tool_calls"].([]any); ok {
 		for _, raw := range calls {
