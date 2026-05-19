@@ -1,6 +1,6 @@
 # iRelay
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-0f766e)](./VERSION)
+[![Version](https://img.shields.io/badge/version-v0.2.0-0f766e)](./VERSION)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](./go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-success)](./go.mod)
@@ -15,7 +15,7 @@ iRelay 是一个很小的本机中转服务，让 Codex 可以通过 OpenAI Resp
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前版本 | `v0.1.0` |
+| 当前版本 | `v0.2.0` |
 | 目标用户 | 想用 Codex + DeepSeek 的个人开发者 |
 | 中转链路 | `Codex Responses -> iRelay -> DeepSeek Chat Completions` |
 | 运行方式 | 本机 HTTP 服务 |
@@ -98,13 +98,14 @@ export DEEPSEEK_API_KEY="你的 DeepSeek API Key"
 运行：
 
 ```bash
-irelay
+irelay serve
 ```
 
 验证：
 
 ```bash
 irelay --version
+irelay doctor
 curl http://localhost:8787/health
 curl http://localhost:8787/v1/models
 ```
@@ -114,7 +115,7 @@ curl http://localhost:8787/v1/models
 可以用内置命令自动写入 Codex provider 配置：
 
 ```bash
-make setup-codex
+irelay setup
 ```
 
 它会：
@@ -123,12 +124,17 @@ make setup-codex
 - 设置默认 `model_provider = "irelay"`
 - 设置默认模型 `deepseek-v4-pro`
 - 向 `~/.zshrc` 追加 `IRELAY_API_KEY=1`
+- 如果 `~/.zshrc` 里还没有 `DEEPSEEK_API_KEY`，会提示你输入 DeepSeek API Key 并写入
 
-它不会写入 `DEEPSEEK_API_KEY`。DeepSeek API Key 仍建议你自己手动放进本机 shell 环境：
+之后可以用开关命令切换 Codex 是否默认使用 iRelay：
 
 ```bash
-echo 'export DEEPSEEK_API_KEY="你的 DeepSeek API Key"' >> ~/.zshrc
+irelay on
+irelay off
+irelay status
 ```
+
+`irelay off` 使用保守策略：只移除 Codex 顶层的 `model_provider` 和 `model`，不删除 `[model_providers.irelay]`，也不删除 `DEEPSEEK_API_KEY` 或 `IRELAY_API_KEY`。
 
 临时使用：
 
@@ -153,7 +159,7 @@ env_key = "IRELAY_API_KEY"
 wire_api = "responses"
 ```
 
-如果不用 `make setup-codex`，也可以手动持久化环境变量：
+如果不用 `irelay setup`，也可以手动持久化环境变量：
 
 ```bash
 echo 'export DEEPSEEK_API_KEY="你的 DeepSeek API Key"' >> ~/.zshrc
@@ -240,6 +246,18 @@ ps aux | rg '[i]relay'
 make test
 make build
 make clean
+```
+
+常用命令：
+
+```bash
+irelay serve
+irelay setup
+irelay on
+irelay off
+irelay status
+irelay doctor
+irelay version
 ```
 
 代码保持单 `package main`，只按职责轻量拆文件：

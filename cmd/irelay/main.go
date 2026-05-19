@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-const appVersion = "0.1.0"
+const appVersion = "0.2.0"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
@@ -27,17 +28,85 @@ type config struct {
 }
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "-v", "--version", "version":
-			fmt.Printf("iRelay v%s\n", appVersion)
-			return
-		}
+	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func runCLI(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return serve(stderr)
 	}
 
+	switch args[0] {
+	case "serve":
+		return serve(stderr)
+	case "-v", "--version", "version":
+		fmt.Fprintf(stdout, "iRelay v%s\n", appVersion)
+		return 0
+	case "-h", "--help", "help":
+		printHelp(stdout)
+		return 0
+	case "setup":
+		if err := setupCodex(os.Stdin, stdout); err != nil {
+			fmt.Fprintf(stderr, "setup failed: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "Codex configured to use iRelay.")
+		return 0
+	case "on":
+		if err := switchCodex(true); err != nil {
+			fmt.Fprintf(stderr, "on failed: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "iRelay enabled for Codex.")
+		return 0
+	case "off":
+		if err := switchCodex(false); err != nil {
+			fmt.Fprintf(stderr, "off failed: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "iRelay disabled for Codex.")
+		return 0
+	case "status":
+		if err := printCodexStatus(stdout); err != nil {
+			fmt.Fprintf(stderr, "status failed: %v\n", err)
+			return 1
+		}
+		return 0
+	case "doctor":
+		if err := runDoctor(stdout); err != nil {
+			fmt.Fprintf(stderr, "doctor failed: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
+	printHelp(stderr)
+	return 1
+}
+
+func printHelp(w io.Writer) {
+	fmt.Fprintf(w, `iRelay v%s
+
+Usage:
+  irelay                         Start the local bridge server
+  irelay serve                   Start the local bridge server
+  irelay setup                   Configure Codex to use iRelay
+  irelay on                      Enable iRelay as Codex default
+  irelay off                     Disable iRelay without deleting config or keys
+  irelay status                  Show whether Codex currently uses iRelay
+  irelay doctor                  Check local iRelay/Codex readiness
+  irelay version                 Print version
+
+`, appVersion)
+}
+
+func serve(logOutput io.Writer) int {
+	log.SetOutput(logOutput)
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		return 1
 	}
 
 	server := &http.Server{
@@ -61,13 +130,16 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Fatal(err)
+			log.Print(err)
+			return 1
 		}
 	case err := <-errs:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			log.Print(err)
+			return 1
 		}
 	}
+	return 0
 }
 
 func loadConfig() (config, error) {
