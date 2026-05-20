@@ -232,8 +232,13 @@ func hasTable(toml, table string) bool {
 
 func runDoctor(w io.Writer) error {
 	fmt.Fprintf(w, "iRelay v%s\n", appVersion)
-	reportEnv(w, "DEEPSEEK_API_KEY")
-	reportEnv(w, "IRELAY_API_KEY")
+	var actions []string
+	if !reportEnv(w, "DEEPSEEK_API_KEY") {
+		actions = appendDoctorAction(actions, "Run: irelay setup")
+	}
+	if !reportEnv(w, "IRELAY_API_KEY") {
+		actions = appendDoctorAction(actions, "Run: irelay setup")
+	}
 
 	_, configPath, err := codexConfigPath()
 	if err != nil {
@@ -242,28 +247,63 @@ func runDoctor(w io.Writer) error {
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(w, "Codex config: missing (%s)\n", configPath)
+		actions = appendDoctorAction(actions, "Run: irelay setup")
 	} else {
 		content := string(raw)
+		providerOK := hasTopLevelAssignment(content, "model_provider", "irelay")
+		modelOK := hasTopLevelAssignment(content, "model", "deepseek-v4-pro")
+		providerBlockOK := hasTable(content, "model_providers.irelay")
 		fmt.Fprintf(w, "Codex config: %s\n", configPath)
-		fmt.Fprintf(w, "Codex provider: %s\n", statusLine(hasTopLevelAssignment(content, "model_provider", "irelay")))
-		fmt.Fprintf(w, "Codex model: %s\n", statusLine(hasTopLevelAssignment(content, "model", "deepseek-v4-pro")))
-		fmt.Fprintf(w, "iRelay provider block: %s\n", statusLine(hasTable(content, "model_providers.irelay")))
+		fmt.Fprintf(w, "Codex provider: %s\n", statusLine(providerOK))
+		fmt.Fprintf(w, "Codex model: %s\n", statusLine(modelOK))
+		fmt.Fprintf(w, "iRelay provider block: %s\n", statusLine(providerBlockOK))
+		if !providerBlockOK {
+			actions = appendDoctorAction(actions, "Run: irelay setup")
+		} else if !providerOK || !modelOK {
+			actions = appendDoctorAction(actions, "Run: irelay on")
+		}
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://localhost:8787/health")
 	if err != nil {
 		fmt.Fprintf(w, "Server health: unavailable (%v)\n", err)
+		actions = appendDoctorAction(actions, "Run: irelay serve")
+		printDoctorActions(w, actions)
 		return nil
 	}
 	defer resp.Body.Close()
 	fmt.Fprintf(w, "Server health: HTTP %d\n", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		actions = appendDoctorAction(actions, "Check: irelay serve logs")
+	}
+	printDoctorActions(w, actions)
 	return nil
 }
 
-func reportEnv(w io.Writer, name string) {
+func reportEnv(w io.Writer, name string) bool {
 	_, ok := os.LookupEnv(name)
 	fmt.Fprintf(w, "%s: %s\n", name, statusLine(ok))
+	return ok
+}
+
+func appendDoctorAction(actions []string, action string) []string {
+	for _, existing := range actions {
+		if existing == action {
+			return actions
+		}
+	}
+	return append(actions, action)
+}
+
+func printDoctorActions(w io.Writer, actions []string) {
+	if len(actions) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nNext steps:")
+	for _, action := range actions {
+		fmt.Fprintf(w, "- %s\n", action)
+	}
 }
 
 func statusLine(ok bool) string {

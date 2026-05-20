@@ -190,6 +190,8 @@ func TestRunDoctorChecksCodexTopLevelModel(t *testing.T) {
 	configPath := filepath.Join(home, ".codex", "config.toml")
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_CONFIG", configPath)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("IRELAY_API_KEY", "1")
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -214,5 +216,28 @@ name = "iRelay"
 	}
 	if !strings.Contains(text, "iRelay provider block: ok") {
 		t.Fatalf("doctor should still find provider block:\n%s", text)
+	}
+	if !strings.Contains(text, "Next steps:") || !strings.Contains(text, "- Run: irelay on") {
+		t.Fatalf("doctor should suggest enabling iRelay:\n%s", text)
+	}
+}
+
+func TestRunDoctorSuggestsSetupWhenConfigMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_CONFIG", filepath.Join(home, ".codex", "config.toml"))
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("IRELAY_API_KEY", "1")
+
+	var out strings.Builder
+	if err := runDoctor(&out); err != nil {
+		t.Fatalf("runDoctor returned error: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "Codex config: missing") {
+		t.Fatalf("doctor should report missing config:\n%s", text)
+	}
+	if !strings.Contains(text, "Next steps:") || !strings.Contains(text, "- Run: irelay setup") {
+		t.Fatalf("doctor should suggest setup:\n%s", text)
 	}
 }
