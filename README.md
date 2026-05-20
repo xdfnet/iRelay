@@ -1,7 +1,7 @@
 # iRelay
 
-[![Version](https://img.shields.io/badge/version-v1.2.1-0f766e)](./package.json)
-[![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](./go.mod)
+[![Version](https://img.shields.io/badge/version-v1.2.2-0f766e)](./package.json)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8)](./go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-success)](./go.mod)
 
@@ -15,7 +15,7 @@ Codex Responses → iRelay → DeepSeek Chat Completions
 
 | 项目 | 内容 |
 |------|------|
-| 当前版本 | `v1.2.1` |
+| 当前版本 | `v1.2.2` |
 | 默认地址 | `http://localhost:8787` |
 | 依赖 | Go 标准库，零第三方依赖 |
 | 开源协议 | MIT |

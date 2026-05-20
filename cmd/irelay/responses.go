@@ -79,15 +79,27 @@ func (body responsesRequest) modelOrDefault() string {
 	if body.Model == defaultModel || body.Model == fallbackModel {
 		return body.Model
 	}
-	if body.Model != "" {
-		log.Printf("unknown model %q, fallback to %s", body.Model, fallbackModel)
+	if body.Model == "" {
+		return defaultModel
 	}
+	log.Printf("unknown model %q, fallback to %s", body.Model, fallbackModel)
 	return fallbackModel
+}
+
+func instructionsToText(val any) string {
+	switch v := val.(type) {
+	case string:
+		return v
+	case []any:
+		return contentToText(v)
+	default:
+		return anyToString(val)
+	}
 }
 
 func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 	var messages []chatMessage
-	if text := anyToString(body.Instructions); text != "" {
+	if text := instructionsToText(body.Instructions); text != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: text})
 	}
 
@@ -104,8 +116,8 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 			}
 			if anyToString(item["type"]) == "function_call" {
 				toolCalls := collectFunctionCalls(input, &i)
-				if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" && len(messages[len(messages)-1].ToolCalls) == 0 {
-					messages[len(messages)-1].ToolCalls = toolCalls
+				if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
+					messages[len(messages)-1].ToolCalls = append(messages[len(messages)-1].ToolCalls, toolCalls...)
 				} else {
 					messages = append(messages, chatMessage{Role: "assistant", Content: "", ToolCalls: toolCalls})
 				}
@@ -324,7 +336,7 @@ func ensureToolAfterAssistant(messages []chatMessage) []chatMessage {
 				if nxt.Role == "tool" && expectedSet[nxt.ToolCallID] {
 					delete(expectedSet, nxt.ToolCallID)
 					toolMsgs = append(toolMsgs, nxt)
-				} else if nxt.Role == "system" || nxt.Role == "developer" {
+				} else if nxt.Role == "system" {
 					nonToolMsgs = append(nonToolMsgs, nxt)
 				} else {
 					break

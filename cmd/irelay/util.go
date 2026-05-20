@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -49,10 +50,13 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+var idCounter uint64
+
 func randomID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		n := atomic.AddUint64(&idCounter, 1)
+		return fmt.Sprintf("%d-%d", time.Now().UnixNano(), n)
 	}
 	return hex.EncodeToString(b[:])
 }

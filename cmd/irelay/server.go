@@ -118,7 +118,10 @@ func (cfg config) deepseekChat(ctx context.Context, payload map[string]any) (*ht
 		req.Header.Set("Authorization", "Bearer "+cfg.apiKey)
 	}
 
-	client := &http.Client{Transport: newTransport()}
+	client := cfg.httpClient
+	if client == nil {
+		client = &http.Client{Transport: newTransport()}
+	}
 	return client.Do(req)
 }
 

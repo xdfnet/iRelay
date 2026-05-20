@@ -15,16 +15,17 @@ import (
 	"time"
 )
 
-const appVersion = "1.2.1"
+const appVersion = "1.2.2"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
 
 type config struct {
-	port     string
-	upstream *url.URL
-	apiKey   string
-	trace    *tracer
+	port       string
+	upstream   *url.URL
+	apiKey     string
+	trace      *tracer
+	httpClient *http.Client
 }
 
 func main() {
@@ -154,13 +155,14 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	if upstream.Scheme == "" || upstream.Host == "" {
-		return config{}, errors.New("DEEPSEEK_BASE_URL must include scheme and host")
+		return config{}, errors.New("upstream URL must include scheme and host")
 	}
 
 	return config{
-		port:     defaultPort,
-		upstream: upstream,
-		apiKey:   apiKey,
-		trace:    newTracerFromEnv(),
+		port:       defaultPort,
+		upstream:   upstream,
+		apiKey:     apiKey,
+		trace:      newTracerFromEnv(),
+		httpClient: &http.Client{Transport: newTransport()},
 	}, nil
 }
