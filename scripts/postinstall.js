@@ -32,8 +32,10 @@ if (goCheck.status !== 0) {
   process.exit(1);
 }
 
+const pkg = require(path.join(root, "package.json"));
+
 ensureDir(dist);
-const result = spawnSync("go", ["build", "-o", output, "./cmd/irelay"], {
+const result = spawnSync("go", ["build", "-ldflags", `-s -w -X main.version=${pkg.version}`, "-o", output, "./cmd/irelay"], {
   cwd: root,
   stdio: "inherit",
 });

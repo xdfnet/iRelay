@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.4.1"
+var version = "dev"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
@@ -44,7 +44,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	case "serve":
 		return serve(stderr)
 	case "-v", "--version", "version":
-		fmt.Fprintf(stdout, "iRelay v%s\n", appVersion)
+		fmt.Fprintf(stdout, "iRelay v%s\n", version)
 		return 0
 	case "-h", "--help", "help":
 		printHelp(stdout)
@@ -104,7 +104,7 @@ Usage:
   irelay doctor                  Check local iRelay/Codex readiness
   irelay version                 Print version
 
-`, appVersion)
+`, version)
 }
 
 func serve(logOutput io.Writer) int {

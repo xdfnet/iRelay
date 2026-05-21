@@ -69,7 +69,7 @@ func TestRunCLIHelpAndVersion(t *testing.T) {
 	if code := runCLI([]string{"--version"}, &out, &strings.Builder{}); code != 0 {
 		t.Fatalf("runCLI version exit = %d, want 0", code)
 	}
-	if !strings.Contains(out.String(), "iRelay v"+appVersion) {
+	if !strings.Contains(out.String(), "iRelay v"+version) {
 		t.Fatalf("version output = %q", out.String())
 	}
 

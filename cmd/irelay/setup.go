@@ -231,7 +231,7 @@ func hasTable(toml, table string) bool {
 }
 
 func runDoctor(w io.Writer) error {
-	fmt.Fprintf(w, "iRelay v%s\n", appVersion)
+	fmt.Fprintf(w, "iRelay v%s\n", version)
 	var actions []string
 	if !reportEnv(w, "DEEPSEEK_API_KEY") {
 		actions = appendDoctorAction(actions, "Run: irelay setup")
