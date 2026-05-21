@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.4.0"
+const appVersion = "1.4.1"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
@@ -163,19 +163,17 @@ func restartService(stderr io.Writer) int {
 }
 
 func loadConfig() (config, error) {
-	rawUpstream := strings.TrimRight(defaultUpstream, "/")
-	apiKey := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
-
-	// 优先读配置文件
-	if fileCfg, err := loadFileConfig(); err == nil && fileCfg.APIKey != "" {
-		apiKey = fileCfg.APIKey
-		if fileCfg.Upstream != "" {
-			rawUpstream = strings.TrimRight(fileCfg.Upstream, "/")
-		}
+	fileCfg, err := loadFileConfig()
+	if err != nil {
+		return config{}, fmt.Errorf("读取配置失败: %w，编辑 ~/.config/irelay/config.json", err)
+	}
+	if fileCfg.APIKey == "" {
+		return config{}, errors.New("apiKey 未设置，编辑 ~/.config/irelay/config.json")
 	}
 
-	if apiKey == "" {
-		return config{}, errors.New("apiKey 未设置，编辑 ~/.config/irelay/config.json 或设置 DEEPSEEK_API_KEY 环境变量")
+	rawUpstream := strings.TrimRight(fileCfg.Upstream, "/")
+	if rawUpstream == "" {
+		rawUpstream = defaultUpstream
 	}
 
 	upstream, err := url.Parse(rawUpstream)
@@ -189,7 +187,7 @@ func loadConfig() (config, error) {
 	return config{
 		port:       defaultPort,
 		upstream:   upstream,
-		apiKey:     apiKey,
+		apiKey:     fileCfg.APIKey,
 		trace:      newTracerFromEnv(),
 		httpClient: &http.Client{Transport: newTransport()},
 	}, nil
