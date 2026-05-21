@@ -9,13 +9,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 )
 
-const appVersion = "1.2.2"
+const appVersion = "1.3.0"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
@@ -79,6 +81,8 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "restart":
+		return restartService(stderr)
 	}
 
 	fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
@@ -90,12 +94,12 @@ func printHelp(w io.Writer) {
 	fmt.Fprintf(w, `iRelay v%s
 
 Usage:
-  irelay                         Start the local bridge server
-  irelay serve                   Start the local bridge server
+  irelay serve                   Start server
+  irelay status                  Service status
+  irelay restart                 Restart service
   irelay setup                   Configure Codex to use iRelay
   irelay on                      Enable iRelay as Codex default
   irelay off                     Disable iRelay without deleting config or keys
-  irelay status                  Show whether Codex currently uses iRelay
   irelay doctor                  Check local iRelay/Codex readiness
   irelay version                 Print version
 
@@ -140,6 +144,20 @@ func serve(logOutput io.Writer) int {
 			return 1
 		}
 	}
+	return 0
+}
+
+func restartService(stderr io.Writer) int {
+	home, _ := os.UserHomeDir()
+	plist := filepath.Join(home, "Library", "LaunchAgents", "com.user.irelay.plist")
+	if err := exec.Command("launchctl", "unload", plist).Run(); err != nil {
+		fmt.Fprintf(stderr, "failed to unload service: %v\n", err)
+	}
+	if err := exec.Command("launchctl", "load", plist).Run(); err != nil {
+		fmt.Fprintf(stderr, "failed to load service: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stderr, "iRelay 已重启")
 	return 0
 }
 

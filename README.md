@@ -114,9 +114,9 @@ macOS 用户级服务：
 
 ```bash
 # 重载
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.local.irelay.plist 2>/dev/null || true
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.local.irelay.plist
-launchctl kickstart -k gui/$(id -u)/com.local.irelay
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.user.irelay.plist 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.irelay.plist
+launchctl kickstart -k gui/$(id -u)/com.user.irelay
 
 # 查看
 launchctl list | rg irelay
