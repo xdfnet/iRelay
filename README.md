@@ -1,6 +1,6 @@
 # iRelay
 
-[![Version](https://img.shields.io/badge/version-v1.2.2-0f766e)](./package.json)
+[![npm](https://img.shields.io/npm/v/@xdfnet/irelay)](https://npm.im/@xdfnet/irelay)
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8)](./go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-success)](./go.mod)
