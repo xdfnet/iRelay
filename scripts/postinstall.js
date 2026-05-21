@@ -31,16 +31,25 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-// macOS: 设置 launchd 自启动
+// macOS: 配置文件和 launchd 自启动
 if (process.platform === "darwin") {
   const home = os.homedir();
+  const configDir = path.join(home, ".config", "irelay");
+  const configPath = path.join(configDir, "config.json");
   const plistDir = path.join(home, "Library", "LaunchAgents");
   const plistPath = path.join(plistDir, "com.user.irelay.plist");
-  const logDir = path.join(home, ".config", "irelay");
-  const binaryPath = output;
 
+  ensureDir(configDir);
   ensureDir(plistDir);
-  ensureDir(logDir);
+
+  // 首次安装创建示例配置
+  if (!fs.existsSync(configPath)) {
+    fs.writeFileSync(configPath, JSON.stringify({
+      apiKey: "",
+      upstream: "https://api.deepseek.com"
+    }, null, 2) + "\n");
+    console.log("[irelay postinstall] 配置文件已创建: " + configPath);
+  }
 
   const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -50,18 +59,16 @@ if (process.platform === "darwin") {
     <string>com.user.irelay</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/zsh</string>
-        <string>-c</string>
-        <string>source ~/.zshrc 2>/dev/null; exec ${binaryPath}</string>
+        <string>${output}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${logDir}/irelay.log</string>
+    <string>${configDir}/irelay.log</string>
     <key>StandardErrorPath</key>
-    <string>${logDir}/irelay_error.log</string>
+    <string>${configDir}/irelay_error.log</string>
 </dict>
 </plist>
 `;

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.3.0"
+const appVersion = "1.4.0"
 const defaultPort = "8787"
 const defaultUpstream = "https://api.deepseek.com"
 const defaultTraceDir = "/tmp/irelay-trace"
@@ -164,8 +165,17 @@ func restartService(stderr io.Writer) int {
 func loadConfig() (config, error) {
 	rawUpstream := strings.TrimRight(defaultUpstream, "/")
 	apiKey := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
+
+	// 优先读配置文件
+	if fileCfg, err := loadFileConfig(); err == nil && fileCfg.APIKey != "" {
+		apiKey = fileCfg.APIKey
+		if fileCfg.Upstream != "" {
+			rawUpstream = strings.TrimRight(fileCfg.Upstream, "/")
+		}
+	}
+
 	if apiKey == "" {
-		return config{}, errors.New("DEEPSEEK_API_KEY is required")
+		return config{}, errors.New("apiKey 未设置，编辑 ~/.config/irelay/config.json 或设置 DEEPSEEK_API_KEY 环境变量")
 	}
 
 	upstream, err := url.Parse(rawUpstream)
@@ -183,4 +193,23 @@ func loadConfig() (config, error) {
 		trace:      newTracerFromEnv(),
 		httpClient: &http.Client{Transport: newTransport()},
 	}, nil
+}
+
+type fileConfig struct {
+	APIKey   string `json:"apiKey"`
+	Upstream string `json:"upstream"`
+}
+
+func loadFileConfig() (*fileConfig, error) {
+	home, _ := os.UserHomeDir()
+	cfgPath := filepath.Join(home, ".config", "irelay", "config.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	var cfg fileConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
