@@ -14,8 +14,8 @@ import (
 )
 
 const codexProviderBlock = `[model_providers.irelay]
-name = "iRelay"
-base_url = "http://localhost:8787/v1"
+name = "deepseek-v4-pro"
+base_url = "http://127.0.0.1:8787/v1"
 env_key = "IRELAY_API_KEY"
 wire_api = "responses"
 `
@@ -190,7 +190,7 @@ func startService() error {
 func waitForHealth() error {
 	client := &http.Client{Timeout: 1 * time.Second}
 	for range 30 {
-		resp, err := client.Get("http://localhost:8787/health")
+		resp, err := client.Get("http://127.0.0.1:8787/health")
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -391,7 +391,7 @@ func runDoctor(w io.Writer) error {
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://localhost:8787/health")
+	resp, err := client.Get("http://127.0.0.1:8787/health")
 	if err != nil {
 		fmt.Fprintf(w, "Server health: unavailable (%v)\n", err)
 		actions = appendDoctorAction(actions, "Run: irelay serve")

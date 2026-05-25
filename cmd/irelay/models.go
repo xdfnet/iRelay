@@ -23,8 +23,12 @@ func (cfg config) handleModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func modelInfo(id string, description string, priority int, thinking bool) map[string]any {
-	m := map[string]any{
+func modelInfo(id string, desc string, priority int, thinking bool) map[string]any {
+	reasoningLevel := "none"
+	if thinking {
+		reasoningLevel = "medium"
+	}
+	return map[string]any{
 		"id":                               id,
 		"slug":                             id,
 		"name":                             id,
@@ -33,9 +37,14 @@ func modelInfo(id string, description string, priority int, thinking bool) map[s
 		"created":                          0,
 		"owned_by":                         "deepseek",
 		"provider":                         "deepseek",
-		"description":                      description,
-		"supported_reasoning_levels":       []any{},
-		"default_reasoning_level":          "none",
+		"description":                      desc,
+		"supported_reasoning_levels": []any{
+			map[string]any{"effort": "none", "description": ""},
+			map[string]any{"effort": "low", "description": ""},
+			map[string]any{"effort": "medium", "description": ""},
+			map[string]any{"effort": "high", "description": ""},
+		},
+		"default_reasoning_level":          reasoningLevel,
 		"supports_reasoning_summaries":     false,
 		"shell_type":                       "shell_command",
 		"visibility":                       "list",
@@ -66,14 +75,4 @@ func modelInfo(id string, description string, priority int, thinking bool) map[s
 			},
 		},
 	}
-	if thinking {
-		m["supported_reasoning_levels"] = []any{
-			map[string]any{"name": "none", "effort": 0.0},
-			map[string]any{"name": "low", "effort": 0.25},
-			map[string]any{"name": "medium", "effort": 0.5},
-			map[string]any{"name": "high", "effort": 1.0},
-		}
-		m["default_reasoning_level"] = "medium"
-	}
-	return m
 }
