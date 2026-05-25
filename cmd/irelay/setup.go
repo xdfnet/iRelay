@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,15 +20,53 @@ env_key = "IRELAY_API_KEY"
 wire_api = "responses"
 `
 
+const plistContentTmpl = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.irelay</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>%s</string>
+    <key>StandardErrorPath</key>
+    <string>%s</string>
+</dict>
+</plist>
+`
+
 func setupCodex(input io.Reader, output io.Writer) error {
-	home, configPath, err := codexConfigPath()
+	if err := ensureConfig(output); err != nil {
+		return err
+	}
+	if err := ensurePlist(); err != nil {
+		return err
+	}
+	fmt.Fprintln(output, "✅ iRelay 服务已配置")
+
+	if err := startService(); err != nil {
+		fmt.Fprintf(output, "⚠️  服务启动失败: %v\n", err)
+		fmt.Fprintln(output, "   请稍后手动运行: irelay restart")
+	} else if err := waitForHealth(); err != nil {
+		fmt.Fprintf(output, "⚠️  服务启动中，请稍后检查 irelay status\n")
+	} else {
+		fmt.Fprintln(output, "✅ iRelay 服务已启动")
+	}
+
+	_, configPath, err := codexConfigPath()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return err
 	}
-
 	raw, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -35,7 +74,12 @@ func setupCodex(input io.Reader, output io.Writer) error {
 	if err := os.WriteFile(configPath, []byte(configureCodexTOML(string(raw))), 0o600); err != nil {
 		return err
 	}
+	fmt.Fprintln(output, "✅ Codex 已配置为使用 iRelay")
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
 	zshrcPath := filepath.Join(home, ".zshrc")
 	zshrc, err := os.ReadFile(zshrcPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -74,6 +118,88 @@ func setupCodex(input io.Reader, output io.Writer) error {
 	}
 
 	return nil
+}
+
+func configDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "irelay"), nil
+}
+
+func binaryPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "bin", "irelay")
+}
+
+func plistPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "LaunchAgents", "com.user.irelay.plist")
+}
+
+func ensureConfig(output io.Writer) error {
+	dir, err := configDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "config.json")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	cfg := fmt.Sprintf(`{
+    "apiKey": "%s",
+    "upstream": "https://api.deepseek.com"
+}
+`, os.Getenv("DEEPSEEK_API_KEY"))
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(output, "✅ 配置文件已创建: %s\n", path)
+	if os.Getenv("DEEPSEEK_API_KEY") == "" {
+		fmt.Fprintf(output, "⚠️  请编辑 %s 填入 apiKey\n", path)
+	}
+	return nil
+}
+
+func ensurePlist() error {
+	bin := binaryPath()
+	dir, err := configDir()
+	if err != nil {
+		return err
+	}
+	plist := plistPath()
+	if err := os.MkdirAll(filepath.Dir(plist), 0o700); err != nil {
+		return err
+	}
+	content := fmt.Sprintf(plistContentTmpl, bin,
+		filepath.Join(dir, "irelay.log"),
+		filepath.Join(dir, "irelay_error.log"))
+	return os.WriteFile(plist, []byte(content), 0o600)
+}
+
+func startService() error {
+	plist := plistPath()
+	_ = exec.Command("launchctl", "unload", plist).Run()
+	return exec.Command("launchctl", "load", "-w", plist).Run()
+}
+
+func waitForHealth() error {
+	client := &http.Client{Timeout: 1 * time.Second}
+	for range 30 {
+		resp, err := client.Get("http://localhost:8787/health")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return errors.New("health check timeout")
 }
 
 func switchCodex(enable bool) error {

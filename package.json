@@ -1,6 +1,6 @@
 {
   "name": "@xdfnet/irelay",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "A tiny local bridge that lets Codex use DeepSeek through the OpenAI Responses API shape.",
   "license": "MIT",
   "homepage": "https://github.com/xdfnet/iRelay#readme",

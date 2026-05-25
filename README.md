@@ -15,7 +15,7 @@ Codex Responses → iRelay → DeepSeek Chat Completions
 
 | 项目 | 内容 |
 |------|------|
-| 当前版本 | `v1.6.0` |
+| 当前版本 | `v1.6.1` |
 | 默认地址 | `http://localhost:8787` |
 | 依赖 | Go 标准库，零第三方依赖 |
 | 开源协议 | MIT |
@@ -105,6 +105,8 @@ irelay setup
 ```bash
 irelay on       # 启用 iRelay
 irelay off      # 停用 iRelay（只移除顶层配置，保留 provider 定义和密钥）
+irelay restart  # 重启服务
+irelay update   # 升级到最新版
 irelay status   # 查看当前状态
 irelay doctor   # 检查环境就绪情况
 ```

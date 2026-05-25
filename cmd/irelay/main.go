@@ -85,6 +85,8 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "restart":
 		return restartService(stderr)
+	case "update":
+		return updateService(stdout, stderr)
 	}
 
 	fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
@@ -150,17 +152,47 @@ func serve(logOutput io.Writer) int {
 }
 
 func restartService(stderr io.Writer) int {
-	home, _ := os.UserHomeDir()
-	plist := filepath.Join(home, "Library", "LaunchAgents", "com.user.irelay.plist")
+	if _, err := os.Stat(binaryPath()); os.IsNotExist(err) {
+		fmt.Fprintln(stderr, "iRelay 未安装，请先运行: npm install -g @xdfnet/irelay")
+		return 1
+	}
+	if err := ensurePlist(); err != nil {
+		fmt.Fprintf(stderr, "plist 写入失败: %v\n", err)
+		return 1
+	}
+	plist := plistPath()
 	if err := exec.Command("launchctl", "unload", plist).Run(); err != nil {
 		fmt.Fprintf(stderr, "failed to unload service: %v\n", err)
 	}
-	if err := exec.Command("launchctl", "load", plist).Run(); err != nil {
+	if err := exec.Command("launchctl", "load", "-w", plist).Run(); err != nil {
 		fmt.Fprintf(stderr, "failed to load service: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(stderr, "iRelay 已重启")
+	if err := waitForHealth(); err != nil {
+		fmt.Fprintln(stderr, "⚠️  服务已重启但健康检查未通过，请检查日志")
+		fmt.Fprintf(stderr, "   less %s\n", filepath.Join(mustConfigDir(), "irelay_error.log"))
+		return 1
+	}
+	fmt.Fprintln(stderr, "✅ iRelay 已重启")
 	return 0
+}
+
+func mustConfigDir() string {
+	dir, _ := configDir()
+	return dir
+}
+
+func updateService(stdout, stderr io.Writer) int {
+	fmt.Fprintln(stdout, "正在检查更新...")
+	cmd := exec.Command("npm", "install", "-g", "@xdfnet/irelay")
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(stderr, "npm install 失败: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "✅ 二进制已更新")
+	return restartService(stderr)
 }
 
 func loadConfig() (config, error) {
