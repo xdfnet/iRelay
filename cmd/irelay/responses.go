@@ -27,10 +27,11 @@ type responseTool struct {
 }
 
 type chatMessage struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	ToolCalls        []toolCall `json:"tool_calls,omitempty"`
 }
 
 type toolCall struct {
@@ -50,9 +51,41 @@ func responsesToChatPayload(body responsesRequest, thinking bool) (map[string]an
 		return nil, err
 	}
 
+	// 转为 []map[string]any，thinking 模式下强制带 reasoning_content
+	msgMaps := make([]map[string]any, len(messages))
+	for i, m := range messages {
+		mm := map[string]any{"role": m.Role}
+		if m.Content != "" {
+			mm["content"] = m.Content
+		}
+		if thinking && m.Role == "assistant" {
+			mm["reasoning_content"] = m.ReasoningContent
+		} else if m.ReasoningContent != "" {
+			mm["reasoning_content"] = m.ReasoningContent
+		}
+		if m.ToolCallID != "" {
+			mm["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.ToolCalls) > 0 {
+			tcs := make([]any, len(m.ToolCalls))
+			for j, tc := range m.ToolCalls {
+				tcs[j] = map[string]any{
+					"id":   tc.ID,
+					"type": tc.Type,
+					"function": map[string]any{
+						"name":      tc.Function.Name,
+						"arguments": tc.Function.Arguments,
+					},
+				}
+			}
+			mm["tool_calls"] = tcs
+		}
+		msgMaps[i] = mm
+	}
+
 	payload := map[string]any{
 		"model":    body.modelOrDefault(),
-		"messages": messages,
+		"messages": msgMaps,
 	}
 	if body.Temperature != nil {
 		payload["temperature"] = *body.Temperature
@@ -67,10 +100,10 @@ func responsesToChatPayload(body responsesRequest, thinking bool) (map[string]an
 		payload["tools"] = tools
 	}
 
-		if !thinking {
-			applyDeepSeekChatTweaks(payload)
-		}
-		return payload, nil
+	if !thinking {
+		applyDeepSeekChatTweaks(payload)
+	}
+	return payload, nil
 }
 
 func applyDeepSeekChatTweaks(payload map[string]any) {
@@ -110,23 +143,44 @@ func responsesInputToMessages(body responsesRequest) ([]chatMessage, error) {
 		messages = append(messages, chatMessage{Role: "user", Content: input})
 	case []any:
 		i := 0
+		pendingReasoning := ""
 		for i < len(input) {
 			item, ok := input[i].(map[string]any)
 			if !ok {
 				i++
 				continue
 			}
-			if anyToString(item["type"]) == "function_call" {
+			itemType := anyToString(item["type"])
+
+			if itemType == "function_call" {
 				toolCalls := collectFunctionCalls(input, &i)
 				if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
 					messages[len(messages)-1].ToolCalls = append(messages[len(messages)-1].ToolCalls, toolCalls...)
 				} else {
-					messages = append(messages, chatMessage{Role: "assistant", Content: "", ToolCalls: toolCalls})
+					messages = append(messages, chatMessage{Role: "assistant", ToolCalls: toolCalls})
 				}
-			} else {
+				continue
+			}
+
+			if itemType == "reasoning" {
+				i++
+				if text := contentToText(item["content"]); text != "" {
+					if pendingReasoning != "" {
+						pendingReasoning += "\n"
+					}
+					pendingReasoning += text
+				}
+				continue
+			}
+
+			{
 				i++
 				message, ok := responseItemToChatMessage(item)
 				if ok {
+					if pendingReasoning != "" && message.Role == "assistant" {
+						message.ReasoningContent = pendingReasoning
+						pendingReasoning = ""
+					}
 					messages = append(messages, message)
 				}
 			}
@@ -218,7 +272,7 @@ func contentToText(content any) string {
 				parts = append(parts, part)
 			case map[string]any:
 				partType := anyToString(part["type"])
-				if partType == "input_text" || partType == "output_text" || partType == "text" {
+				if partType == "input_text" || partType == "output_text" || partType == "text" || partType == "reasoning_text" {
 					if text := anyToString(part["text"]); text != "" {
 						parts = append(parts, text)
 					}
@@ -263,19 +317,18 @@ func chatCompletionToResponse(chat map[string]any, model string, thinking bool) 
 	text := anyToString(message["content"])
 	output := []any{}
 
-	if thinking {
-		if reasoningText := anyToString(message["reasoning_content"]); reasoningText != "" {
-			output = append(output, map[string]any{
-				"id":     "rs_" + randomID(),
-				"type":   "reasoning",
-				"status": "completed",
-				"content": []any{map[string]any{
-					"type":        "reasoning_text",
-					"text":        reasoningText,
-					"annotations": []any{},
-				}},
-			})
-		}
+	if thinking && message["reasoning_content"] != nil {
+		reasoningText := anyToString(message["reasoning_content"])
+		output = append(output, map[string]any{
+			"id":     "rs_" + randomID(),
+			"type":   "reasoning",
+			"status": "completed",
+			"content": []any{map[string]any{
+				"type":        "reasoning_text",
+				"text":        reasoningText,
+				"annotations": []any{},
+			}},
+		})
 	}
 
 	if text != "" {
