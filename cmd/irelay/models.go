@@ -5,15 +5,15 @@ import "net/http"
 const defaultModel = "deepseek-v4-pro"
 const fallbackModel = "deepseek-v4-flash"
 
-func handleModels(w http.ResponseWriter, r *http.Request) {
+func (cfg config) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	models := []any{
-		modelInfo(defaultModel, "DeepSeek V4 Pro through local iRelay.", 0),
-		modelInfo(fallbackModel, "DeepSeek V4 Flash through local iRelay.", 1),
+		modelInfo(defaultModel, "DeepSeek V4 Pro through local iRelay.", 0, cfg.thinking),
+		modelInfo(fallbackModel, "DeepSeek V4 Flash through local iRelay.", 1, cfg.thinking),
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -23,8 +23,8 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func modelInfo(id string, description string, priority int) map[string]any {
-	return map[string]any{
+func modelInfo(id string, description string, priority int, thinking bool) map[string]any {
+	m := map[string]any{
 		"id":                               id,
 		"slug":                             id,
 		"name":                             id,
@@ -34,15 +34,14 @@ func modelInfo(id string, description string, priority int) map[string]any {
 		"owned_by":                         "deepseek",
 		"provider":                         "deepseek",
 		"description":                      description,
-		"default_reasoning_level":          "none",
 		"supported_reasoning_levels":       []any{},
+		"default_reasoning_level":          "none",
+		"supports_reasoning_summaries":     false,
 		"shell_type":                       "shell_command",
 		"visibility":                       "list",
 		"supported_in_api":                 true,
 		"priority":                         priority,
 		"base_instructions":                "",
-		"supports_reasoning_summaries":     false,
-		"default_reasoning_summary":        "none",
 		"support_verbosity":                false,
 		"default_verbosity":                "low",
 		"apply_patch_tool_type":            "freeform",
@@ -67,4 +66,14 @@ func modelInfo(id string, description string, priority int) map[string]any {
 			},
 		},
 	}
+	if thinking {
+		m["supported_reasoning_levels"] = []any{
+			map[string]any{"name": "none", "effort": 0.0},
+			map[string]any{"name": "low", "effort": 0.25},
+			map[string]any{"name": "medium", "effort": 0.5},
+			map[string]any{"name": "high", "effort": 1.0},
+		}
+		m["default_reasoning_level"] = "medium"
+	}
+	return m
 }

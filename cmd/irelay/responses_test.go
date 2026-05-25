@@ -13,7 +13,7 @@ func TestResponsesToChatPayloadStringInput(t *testing.T) {
 		Temperature:     &temperature,
 	}
 
-	payload, err := responsesToChatPayload(body)
+	payload, err := responsesToChatPayload(body, false)
 	if err != nil {
 		t.Fatalf("responsesToChatPayload returned error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestResponsesToChatPayloadFunctionRoundTripItems(t *testing.T) {
 		},
 	}
 
-	payload, err := responsesToChatPayload(body)
+	payload, err := responsesToChatPayload(body, false)
 	if err != nil {
 		t.Fatalf("responsesToChatPayload returned error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestChatCompletionToResponseIncludesTextAndToolCalls(t *testing.T) {
 		},
 	}
 
-	resp := chatCompletionToResponse(chat, defaultModel)
+	resp := chatCompletionToResponse(chat, defaultModel, false)
 
 	if resp["object"] != "response" || resp["status"] != "completed" {
 		t.Fatalf("response metadata = %#v", resp)
@@ -198,7 +198,7 @@ func TestResponsesToChatPayloadMergesParallelFunctionCalls(t *testing.T) {
 		},
 	}
 
-	payload, err := responsesToChatPayload(body)
+	payload, err := responsesToChatPayload(body, false)
 	if err != nil {
 		t.Fatalf("responsesToChatPayload returned error: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestResponsesToChatPayloadMergeAssistantTextAndFunctionCall(t *testing.T) {
 		},
 	}
 
-	payload, err := responsesToChatPayload(body)
+	payload, err := responsesToChatPayload(body, false)
 	if err != nil {
 		t.Fatalf("responsesToChatPayload returned error: %v", err)
 	}
@@ -321,6 +321,68 @@ func TestApplyDeepSeekChatTweaksDisablesThinking(t *testing.T) {
 	}
 }
 
+func TestChatCompletionToResponseIncludesReasoningWhenThinkingEnabled(t *testing.T) {
+	chat := map[string]any{
+		"model": "deepseek-v4-pro",
+		"choices": []any{
+			map[string]any{
+				"message": map[string]any{
+					"reasoning_content": "先理解问题。",
+					"content":          "好的，我来运行。",
+				},
+			},
+		},
+	}
+
+	resp := chatCompletionToResponse(chat, defaultModel, true)
+
+	output := resp["output"].([]any)
+	if len(output) != 2 {
+		t.Fatalf("output length = %d, want 2 (reasoning + message)", len(output))
+	}
+
+	rs := output[0].(map[string]any)
+	if rs["type"] != "reasoning" {
+		t.Fatalf("output[0].type = %v, want reasoning", rs["type"])
+	}
+	content := rs["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("reasoning content length = %d, want 1", len(content))
+	}
+	part := content[0].(map[string]any)
+	if part["type"] != "reasoning_text" || part["text"] != "先理解问题。" {
+		t.Fatalf("reasoning part = %#v", part)
+	}
+
+	if resp["output_text"] != "好的，我来运行。" {
+		t.Fatalf("output_text = %v, want 好的，我来运行。", resp["output_text"])
+	}
+}
+
+func TestChatCompletionToResponseNoReasoningWhenThinkingDisabled(t *testing.T) {
+	chat := map[string]any{
+		"model": "deepseek-v4-pro",
+		"choices": []any{
+			map[string]any{
+				"message": map[string]any{
+					"reasoning_content": "should be ignored",
+					"content":          "only text",
+				},
+			},
+		},
+	}
+
+	resp := chatCompletionToResponse(chat, defaultModel, false)
+
+	output := resp["output"].([]any)
+	if len(output) != 1 {
+		t.Fatalf("output length = %d, want 1 (only message)", len(output))
+	}
+	if output[0].(map[string]any)["type"] != "message" {
+		t.Fatalf("output[0].type = %v, want message", output[0])
+	}
+}
+
 func TestResponsesToChatPayloadPreservesInputText(t *testing.T) {
 	body := responsesRequest{
 		Model: defaultModel,
@@ -338,7 +400,7 @@ func TestResponsesToChatPayloadPreservesInputText(t *testing.T) {
 		},
 	}
 
-	payload, err := responsesToChatPayload(body)
+	payload, err := responsesToChatPayload(body, false)
 	if err != nil {
 		t.Fatalf("responsesToChatPayload returned error: %v", err)
 	}

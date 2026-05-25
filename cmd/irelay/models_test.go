@@ -11,7 +11,8 @@ func TestHandleModelsReturnsBothCodexModels(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	rec := httptest.NewRecorder()
 
-	handleModels(rec, req)
+	cfg := config{thinking: false}
+	cfg.handleModels(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)

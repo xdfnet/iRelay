@@ -19,7 +19,7 @@ import (
 func newMux(cfg config) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", health)
-	mux.HandleFunc("/v1/models", handleModels)
+	mux.HandleFunc("/v1/models", cfg.handleModels)
 	mux.HandleFunc("/v1/responses", cfg.handleResponses)
 	return mux
 }
@@ -35,6 +35,8 @@ func (cfg config) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	start := time.Now()
+
 	var body responsesRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "request body must be valid JSON")
@@ -43,7 +45,7 @@ func (cfg config) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 	cfg.trace.writeJSON("codex-request", body)
 
-	payload, err := responsesToChatPayload(body)
+	payload, err := responsesToChatPayload(body, cfg.thinking)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -78,10 +80,11 @@ func (cfg config) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.trace.writeJSON("deepseek-response", chat)
 
-	resp := chatCompletionToResponse(chat, body.modelOrDefault())
+	resp := chatCompletionToResponse(chat, body.modelOrDefault(), cfg.thinking)
 	cfg.trace.writeJSON("irelay-response", resp)
 
 	writeJSON(w, http.StatusOK, resp)
+	log.Printf("POST /v1/responses model=%s status=%d duration=%s", resp["model"], http.StatusOK, time.Since(start))
 }
 
 func newTransport() *http.Transport {

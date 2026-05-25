@@ -13,6 +13,7 @@ import (
 )
 
 func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, payload map[string]any, model string) {
+	started := time.Now()
 	upstream, err := cfg.deepseekChat(r.Context(), payload)
 	if err != nil {
 		jsonError(w, http.StatusBadGateway, err.Error())
@@ -53,6 +54,17 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 	nextOutputIndex := 0
 	deepseekEvents := []map[string]any{}
 
+	upstreamModel := model
+	var lastUsage map[string]any
+	var streamErr error
+
+	rsID := ""
+	rsOutputIndex := 0
+	rsContent := ""
+	rsStarted := false
+
+	outputItems := map[int]any{}
+
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -72,9 +84,104 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 					var event map[string]any
 					if err := json.Unmarshal([]byte(data), &event); err == nil {
 						deepseekEvents = append(deepseekEvents, event)
+						if m, _ := event["model"].(string); m != "" {
+							upstreamModel = m
+						}
+						if u, _ := event["usage"].(map[string]any); u != nil {
+							lastUsage = u
+						}
 						delta := firstChoiceDelta(event)
+
+						// reasoning_content delta
+						if cfg.thinking {
+							if reasoningText := anyToString(delta["reasoning_content"]); reasoningText != "" {
+								if !rsStarted {
+									rsStarted = true
+									rsID = "rs_" + randomID()
+									rsOutputIndex = nextOutputIndex
+									nextOutputIndex++
+									writeSSE(w, "response.output_item.added", map[string]any{
+										"type":         "response.output_item.added",
+										"output_index": rsOutputIndex,
+										"item": map[string]any{
+											"id":      rsID,
+											"type":    "reasoning",
+											"status":  "in_progress",
+											"content": []any{},
+										},
+									})
+									writeSSE(w, "response.content_part.added", map[string]any{
+										"type":          "response.content_part.added",
+										"item_id":       rsID,
+										"output_index":  rsOutputIndex,
+										"content_index": 0,
+										"part": map[string]any{
+											"type":        "reasoning_text",
+											"text":        "",
+											"annotations": []any{},
+										},
+									})
+								}
+								rsContent += reasoningText
+								writeSSE(w, "response.reasoning_text.delta", map[string]any{
+									"type":          "response.reasoning_text.delta",
+									"item_id":       rsID,
+									"output_index":  rsOutputIndex,
+									"content_index": 0,
+									"delta":         reasoningText,
+								})
+							}
+						}
+
+						// text content delta
 						if text := anyToString(delta["content"]); text != "" {
 							if !textStarted {
+								// finalize reasoning before text starts
+								if cfg.thinking && rsStarted {
+									rsStarted = false
+									writeSSE(w, "response.reasoning_text.done", map[string]any{
+										"type":          "response.reasoning_text.done",
+										"item_id":       rsID,
+										"output_index":  rsOutputIndex,
+										"content_index": 0,
+										"text":          rsContent,
+									})
+									writeSSE(w, "response.content_part.done", map[string]any{
+										"type":          "response.content_part.done",
+										"item_id":       rsID,
+										"output_index":  rsOutputIndex,
+										"content_index": 0,
+										"part": map[string]any{
+											"type":        "reasoning_text",
+											"text":        rsContent,
+											"annotations": []any{},
+										},
+									})
+									writeSSE(w, "response.output_item.done", map[string]any{
+										"type":         "response.output_item.done",
+										"output_index": rsOutputIndex,
+										"item": map[string]any{
+											"id":     rsID,
+											"type":   "reasoning",
+											"status": "completed",
+											"content": []any{map[string]any{
+												"type":        "reasoning_text",
+												"text":        rsContent,
+												"annotations": []any{},
+											}},
+										},
+									})
+									outputItems[rsOutputIndex] = map[string]any{
+										"id":     rsID,
+										"type":   "reasoning",
+										"status": "completed",
+										"content": []any{map[string]any{
+											"type":        "reasoning_text",
+											"text":        rsContent,
+											"annotations": []any{},
+										}},
+									}
+								}
 								textStarted = true
 								messageID = "msg_" + randomID()
 								messageOutputIndex = nextOutputIndex
@@ -113,6 +220,7 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 							})
 						}
 
+						// tool_call deltas
 						for _, call := range streamToolDeltas(delta) {
 							if _, ok := toolCalls[call.Index]; !ok {
 								itemID := firstNonEmpty(call.ID, "call_"+randomID())
@@ -161,6 +269,7 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Printf("stream read error: %v", err)
+				streamErr = err
 			}
 			break
 		}
@@ -168,7 +277,67 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 	close(done)
 	cfg.trace.writeJSON("deepseek-stream-response", deepseekEvents)
 
-	outputItems := map[int]any{}
+	if streamErr != nil {
+		writeSSE(w, "response.failed", map[string]any{
+			"type": "response.failed",
+			"response": map[string]any{
+				"id":     responseID,
+				"status": "failed",
+				"error":  map[string]any{"message": streamErr.Error()},
+			},
+		})
+		log.Printf("POST /v1/responses model=%s status=failed duration=%s", upstreamModel, time.Since(started))
+		return
+	}
+
+//	outputItems := map[int]any{}
+
+	// reasoning output item (only if text never started to finalize it)
+	if cfg.thinking && rsStarted {
+		rsStarted = false
+		writeSSE(w, "response.reasoning_text.done", map[string]any{
+			"type":          "response.reasoning_text.done",
+			"item_id":       rsID,
+			"output_index":  rsOutputIndex,
+			"content_index": 0,
+			"text":          rsContent,
+		})
+		writeSSE(w, "response.content_part.done", map[string]any{
+			"type":          "response.content_part.done",
+			"item_id":       rsID,
+			"output_index":  rsOutputIndex,
+			"content_index": 0,
+			"part": map[string]any{
+				"type":        "reasoning_text",
+				"text":        rsContent,
+				"annotations": []any{},
+			},
+		})
+		writeSSE(w, "response.output_item.done", map[string]any{
+			"type":         "response.output_item.done",
+			"output_index": rsOutputIndex,
+			"item": map[string]any{
+				"id":     rsID,
+				"type":   "reasoning",
+				"status": "completed",
+				"content": []any{map[string]any{
+					"type":        "reasoning_text",
+					"text":        rsContent,
+					"annotations": []any{},
+				}},
+			},
+		})
+		outputItems[rsOutputIndex] = map[string]any{
+			"id":     rsID,
+			"type":   "reasoning",
+			"status": "completed",
+			"content": []any{map[string]any{
+				"type":        "reasoning_text",
+				"text":        rsContent,
+				"annotations": []any{},
+			}},
+		}
+	}
 
 	if textStarted {
 		messageItem := map[string]any{
@@ -237,13 +406,21 @@ func (cfg config) streamChatAsResponses(w http.ResponseWriter, r *http.Request, 
 			"object":      "response",
 			"created_at":  time.Now().Unix(),
 			"status":      "completed",
-			"model":       model,
+			"model":       upstreamModel,
 			"output":      output,
 			"output_text": accumulated,
 		},
 	}
+	if lastUsage != nil {
+		completed["response"].(map[string]any)["usage"] = map[string]any{
+			"input_tokens":  lastUsage["prompt_tokens"],
+			"output_tokens": lastUsage["completion_tokens"],
+			"total_tokens":  lastUsage["total_tokens"],
+		}
+	}
 	cfg.trace.writeJSON("irelay-stream-response", completed)
 	writeSSE(w, "response.completed", completed)
+	log.Printf("POST /v1/responses model=%s status=completed duration=%s", upstreamModel, time.Since(started))
 }
 
 type streamToolCall struct {

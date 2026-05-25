@@ -122,6 +122,78 @@ func TestStreamMultipleToolCallsCompleteInOutputIndexOrder(t *testing.T) {
 	}
 }
 
+func TestStreamReasoningContentProducesReasoningOutputItem(t *testing.T) {
+	cfg := config{thinking: true}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeChatCompletionChunk(t, w, map[string]any{
+			"content":          "",
+			"reasoning_content": "让我思考一下。\n用户想要",
+		})
+		writeChatCompletionChunk(t, w, map[string]any{
+			"content":          "",
+			"reasoning_content": "运行一个命令。",
+		})
+		writeChatCompletionChunk(t, w, map[string]any{
+			"content":          "好的，我来运行。",
+			"reasoning_content": "",
+		})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	resp := streamResponsesWithCfg(t, upstream.URL, cfg)
+	events := parseSSEEvents(t, resp.Body.String())
+
+	added := eventsOfType(events, "response.output_item.added")
+	if len(added) != 2 {
+		t.Fatalf("output_item.added count = %d, want 2 (reasoning + message)", len(added))
+	}
+	if added[0]["output_index"] != float64(0) {
+		t.Fatalf("first added output_index = %v, want 0", added[0]["output_index"])
+	}
+	item0 := added[0]["item"].(map[string]any)
+	if item0["type"] != "reasoning" {
+		t.Fatalf("first item type = %v, want reasoning", item0["type"])
+	}
+	item1 := added[1]["item"].(map[string]any)
+	if item1["type"] != "message" {
+		t.Fatalf("second item type = %v, want message", item1["type"])
+	}
+
+	rsDeltas := eventsOfType(events, "response.reasoning_text.delta")
+	if len(rsDeltas) != 2 {
+		t.Fatalf("reasoning_text.delta count = %d, want 2", len(rsDeltas))
+	}
+	if rsDeltas[0]["delta"] != "让我思考一下。\n用户想要" {
+		t.Fatalf("first reasoning delta = %v", rsDeltas[0]["delta"])
+	}
+	if rsDeltas[1]["delta"] != "运行一个命令。" {
+		t.Fatalf("second reasoning delta = %v", rsDeltas[1]["delta"])
+	}
+
+	rsDone := firstEventOfType(t, events, "response.reasoning_text.done")
+	if rsDone["text"] != "让我思考一下。\n用户想要运行一个命令。" {
+		t.Fatalf("reasoning_text.done text = %v", rsDone["text"])
+	}
+
+	completed := firstEventOfType(t, events, "response.completed")
+	response := completed["response"].(map[string]any)
+	output := response["output"].([]any)
+	if len(output) != 2 {
+		t.Fatalf("completed output length = %d, want 2", len(output))
+	}
+	if output[0].(map[string]any)["type"] != "reasoning" {
+		t.Fatalf("completed output[0].type = %v, want reasoning", output[0])
+	}
+	if output[1].(map[string]any)["type"] != "message" {
+		t.Fatalf("completed output[1].type = %v, want message", output[1])
+	}
+	if response["output_text"] != "好的，我来运行。" {
+		t.Fatalf("output_text = %v, want 好的，我来运行。", response["output_text"])
+	}
+}
+
 func writeChatCompletionChunk(t *testing.T, w http.ResponseWriter, delta map[string]any) {
 	t.Helper()
 	data, err := json.Marshal(map[string]any{
@@ -139,12 +211,18 @@ func writeChatCompletionChunk(t *testing.T, w http.ResponseWriter, delta map[str
 
 func streamResponsesFromUpstream(t *testing.T, upstreamURL string) *httptest.ResponseRecorder {
 	t.Helper()
+	return streamResponsesWithCfg(t, upstreamURL, config{thinking: false})
+}
+
+func streamResponsesWithCfg(t *testing.T, upstreamURL string, cfg config) *httptest.ResponseRecorder {
+	t.Helper()
 	parsed, err := url.Parse(upstreamURL)
 	if err != nil {
 		t.Fatalf("parse upstream URL: %v", err)
 	}
 
-	cfg := config{upstream: parsed, apiKey: "test-key"}
+	cfg.upstream = parsed
+	cfg.apiKey = "test-key"
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	rec := httptest.NewRecorder()
 

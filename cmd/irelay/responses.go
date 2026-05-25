@@ -44,7 +44,7 @@ type functionCall struct {
 	Arguments string `json:"arguments"`
 }
 
-func responsesToChatPayload(body responsesRequest) (map[string]any, error) {
+func responsesToChatPayload(body responsesRequest, thinking bool) (map[string]any, error) {
 	messages, err := responsesInputToMessages(body)
 	if err != nil {
 		return nil, err
@@ -67,8 +67,10 @@ func responsesToChatPayload(body responsesRequest) (map[string]any, error) {
 		payload["tools"] = tools
 	}
 
-	applyDeepSeekChatTweaks(payload)
-	return payload, nil
+		if !thinking {
+			applyDeepSeekChatTweaks(payload)
+		}
+		return payload, nil
 }
 
 func applyDeepSeekChatTweaks(payload map[string]any) {
@@ -256,10 +258,25 @@ func responsesToolsToChatTools(tools []responseTool) []map[string]any {
 	return converted
 }
 
-func chatCompletionToResponse(chat map[string]any, model string) map[string]any {
+func chatCompletionToResponse(chat map[string]any, model string, thinking bool) map[string]any {
 	message := firstChoiceMessage(chat)
 	text := anyToString(message["content"])
 	output := []any{}
+
+	if thinking {
+		if reasoningText := anyToString(message["reasoning_content"]); reasoningText != "" {
+			output = append(output, map[string]any{
+				"id":     "rs_" + randomID(),
+				"type":   "reasoning",
+				"status": "completed",
+				"content": []any{map[string]any{
+					"type":        "reasoning_text",
+					"text":        reasoningText,
+					"annotations": []any{},
+				}},
+			})
+		}
+	}
 
 	if text != "" {
 		output = append(output, map[string]any{

@@ -27,6 +27,7 @@ type config struct {
 	port       string
 	upstream   *url.URL
 	apiKey     string
+	thinking   bool
 	trace      *tracer
 	httpClient *http.Client
 }
@@ -184,10 +185,16 @@ func loadConfig() (config, error) {
 		return config{}, errors.New("upstream URL must include scheme and host")
 	}
 
+	thinking := false
+	if fileCfg.Thinking != nil {
+		thinking = *fileCfg.Thinking
+	}
+
 	return config{
 		port:       defaultPort,
 		upstream:   upstream,
 		apiKey:     fileCfg.APIKey,
+		thinking:   thinking,
 		trace:      newTracerFromEnv(),
 		httpClient: &http.Client{Transport: newTransport()},
 	}, nil
@@ -196,6 +203,7 @@ func loadConfig() (config, error) {
 type fileConfig struct {
 	APIKey   string `json:"apiKey"`
 	Upstream string `json:"upstream"`
+	Thinking *bool  `json:"thinking"`
 }
 
 func loadFileConfig() (*fileConfig, error) {
