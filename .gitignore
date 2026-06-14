@@ -1,0 +1,10 @@
+*.log
+*.xcuserdata
+*.xcworkspace
+.DS_Store
+.vscode/
+/.build
+/.claude/
+/.swiftpm
+/iCodex.app
+/iCodex.zip
