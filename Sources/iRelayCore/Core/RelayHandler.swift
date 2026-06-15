@@ -38,6 +38,9 @@ public final class RelayHandler {
         server.on("POST", "/v1/responses") { [weak self] req, conn in
             self?.handleResponses(req: req, conn: conn)
         }
+        server.on("POST", "/v1/chat/completions") { [weak self] req, conn in
+            self?.handleChatCompletions(req: req, conn: conn)
+        }
     }
 
     // MARK: - /v1/responses 主处理
@@ -108,6 +111,52 @@ public final class RelayHandler {
                 Log.end()
             }
         }
+    }
+
+    // MARK: - Chat Completions 透传
+
+    private func handleChatCompletions(req: HTTPRequest, conn: ServerConnection) {
+        guard let body = try? JSONSerialization.jsonObject(with: req.body) as? JSON else {
+            conn.sendJSON(status: 400, body: ["error": "invalid JSON"])
+            return
+        }
+        let stream = body["stream"] as? Bool ?? false
+        let start = Date()
+
+        if stream {
+            conn.startSSE()
+            Task {
+                do {
+                    let events = client.chatStream(payload: body)
+                    for try await event in events {
+                        if let data = try? JSONSerialization.data(withJSONObject: event),
+                           let jsonStr = String(data: data, encoding: .utf8) {
+                            conn.sendSSEData(jsonStr)
+                        }
+                    }
+                    conn.sendSSE(event: "data", data: "[DONE]")
+                    conn.close()
+                } catch {
+                    conn.sendSSEData("{\"error\":\"\(escapedJSON(error.localizedDescription))\"}")
+                    conn.close()
+                }
+            }
+        } else {
+            Task {
+                do {
+                    let (chat, status) = try await client.chat(payload: body)
+                    conn.sendJSON(status: status, body: chat)
+                } catch {
+                    conn.sendJSON(status: 502, body: ["error": error.localizedDescription])
+                }
+            }
+        }
+    }
+
+    private func escapedJSON(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
     }
 
     // MARK: - 流式

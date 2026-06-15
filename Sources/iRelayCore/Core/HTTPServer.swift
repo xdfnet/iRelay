@@ -41,6 +41,12 @@ public final class ServerConnection {
         connection.send(content: payload.data(using: .utf8)!, completion: .contentProcessed({ _ in }))
     }
 
+    /// 发送裸 data: 行（Chat Completions SSE 格式）
+    public func sendSSEData(_ data: String) {
+        let payload = "data: \(data)\n\n"
+        connection.send(content: payload.data(using: .utf8)!, completion: .contentProcessed({ _ in }))
+    }
+
     public func sendSSEJSON(event: String, json: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: json) else { return }
         let jsonStr = String(data: data, encoding: .utf8) ?? "{}"
