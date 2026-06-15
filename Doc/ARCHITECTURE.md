@@ -1,68 +1,82 @@
 # iRelay 架构文档
 
-> 版本 1.4.0 · macOS 菜单栏应用 · Zero external dependencies
+> 版本 2.0.0 · macOS 菜单栏应用 · Zero external dependencies
 
 ---
 
 ## 概述
 
-**iRelay** 是一个运行在 macOS 菜单栏的中继代理。它把 **Codex 的 `responses` API** 转换成 **DeepSeek Chat API**，让 Codex 可以直接使用 DeepSeek 模型（V4 Pro / V4 Flash）。
+**iRelay** 是一个运行在 macOS 菜单栏的中继代理。它把 **Codex 的 Responses API** 转换成 **OpenAI Chat Completions API**，让 Codex 可以使用任意兼容的 LLM 提供商（DeepSeek、OpenAI、vLLM、Together、Groq、Ollama 等）。
 
 ```
-Codex CLI ──responses API──→ iRelay (localhost:8787) ──chat API──→ api.deepseek.com
+Codex ──responses API──→ iRelay (localhost:{port}/v1) ──chat API──→ 任意提供商
 ```
 
-只有一个外部依赖：DeepSeek 的上游 API。HTTP 服务器和中继逻辑全部基于 Apple `Network` + `Foundation` 框架手写，零第三方库。
+HTTP 服务器和中继逻辑全部基于 Apple `Network` + `Foundation` 框架手写，零第三方库。
 
 ---
 
 ## 分层架构
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  UI Layer (SwiftUI)                  │
-│  iRelayApp  MenuBarView  ApiKeyConfigWindow         │
-└────────────────────┬────────────────────────────────┘
-                     │ @StateObject / @ObservedObject
-                     ▼
-┌─────────────────────────────────────────────────────┐
-│              State Layer (RelayState)                │
-│  状态管理 · 生命周期 · UserDefaults 持久化           │
-│  Codex 配置同步 · 模型列表拉取                       │
-└─────────┬──────────────────────┬────────────────────┘
-          │ owns                 │ owns
-          ▼                      ▼
-┌──────────────────┐  ┌──────────────────────────┐
-│   RelayHandler    │  │   CodexConfigManager     │
-│  协议转换引擎     │  │   TOML 读写器             │
-│  ↓ owns           │  │   ↓ owns                 │
-│   DeepSeekClient  │  │   CodexAppPatcher         │
-│                  │  │   桌面 App 适配器          │
-│                  │  └──────────────────────────┘
-└──────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                   UI Layer (SwiftUI)                      │
+│  iRelayApp  MenuBarView  ApiKeyConfigWindow              │
+│  ProviderManagerWindow  PortConfigWindow                 │
+└──────────────────────┬───────────────────────────────────┘
+                       │ @StateObject / @ObservedObject
+                       ▼
+┌──────────────────────────────────────────────────────────┐
+│                 State Layer (RelayState)                  │
+│  多提供商管理 · 服务生命周期 · UserDefaults 持久化        │
+│  Codex 配置同步 · 模型列表拉取                            │
+│  └─ ProviderStore — 多提供商 CRUD + v1 迁移               │
+└─────────┬──────────────────────────┬─────────────────────┘
+          │ owns                     │ owns
+          ▼                          ▼
+┌──────────────────────┐  ┌─────────────────────────────┐
+│   RelayHandler        │  │   CodexConfigManager         │
+│   协议转换引擎         │  │   TOML 读写器                │
+│   (注入 ProviderConfig)│  │   ↓ owns                    │
+│   ↓ owns              │  │   CodexAppPatcher            │
+│   ChatClient          │  │   桌面 App 适配器            │
+└──────────────────────┘  └─────────────────────────────┘
           │
           ▼
-┌──────────────────┐
-│   HTTPServer      │
-│  手写 HTTP/1.1   │
-│  (Network.fw)     │
-└──────────────────┘
+┌──────────────────────┐
+│   HTTPServer          │
+│  手写 HTTP/1.1       │
+│  (Network.framework)  │
+└──────────────────────┘
 ```
 
-### 各层职责
+### 模块结构
 
-| 层 | 文件 | 职责 |
-|---|---|---|
-| **UI** | `iRelayApp.swift` | `@main` 入口，创建 `MenuBarExtra`，提供 API Key 配置窗口 |
-| **UI** | `MenuBarView.swift` | 菜单栏界面：模型切换、思考模式、关闭/退出 |
-| **State** | `RelayState.swift` | 全局状态单例，管理服务生命周期，持久化用户偏好 |
-| **Adapter** | `RelayHandler.swift` | **核心引擎**：responses ↔ chat/completions 协议转换 |
-| **Client** | `DeepSeekClient.swift` | DeepSeek API HTTP 客户端（流式+非流式） |
-| **Server** | `HTTPServer.swift` | 零依赖 HTTP/1.1 服务器（NWListener） |
-| **Config** | `CodexConfigManager.swift` | 读写 `~/.codex/config.toml`，写入 `~/.codex/irelay-models.json` |
-| **Config** | `CodexAppPatcher.swift` | 修补 Codex 桌面 App 模型白名单过滤 |
-| **Logger** | `Logger.swift` | 异步文件日志 |
-| **Model** | `RelayConfig.swift` | `ModelInfo` 数据模型 |
+```
+📦 iRelayCore (library, testable)
+├── Core/
+│   ├── ChatClient.swift     # 通用 Chat Completions API 客户端
+│   ├── HTTPServer.swift     # 零依赖 HTTP/1.1 服务器
+│   └── RelayHandler.swift   # 协议转换引擎 + SSE 流式转换
+├── Models/
+│   ├── ProviderConfig.swift # 提供商配置 + ThinkingMode + 预设工厂
+│   └── RelayConfig.swift    # ModelInfo 数据模型
+└── Services/
+    └── Logger.swift          # 异步文件日志
+
+📦 iRelay (executable, depends on iRelayCore)
+├── iRelayApp.swift           # @main 入口 + 所有配置窗口
+├── MenuBarView.swift         # 菜单栏 UI
+├── Models/
+│   └── RelayState.swift      # 全局状态 + ProviderStore 集成
+└── Services/
+    ├── ProviderStore.swift   # 多提供商 UserDefaults 持久化
+    ├── CodexConfigManager.swift  # ~/.codex/config.toml 管理
+    └── CodexAppPatcher.swift # Codex 桌面 App 白名单补丁
+
+📦 iRelayTests (test target)
+└── RelayHandlerTests.swift   # 26 个协议转换单元测试
+```
 
 ---
 
@@ -74,72 +88,69 @@ Codex CLI ──responses API──→ iRelay (localhost:8787) ──chat API─
 App启动
   │
   ├─ RelayState.init()
-  │   ├─ 从 UserDefaults 恢复: apiKey / model / thinking / codexEnabled
+  │   ├─ ProviderStore.init()
+  │   │   └─ migrateFromV1() — 旧 DeepSeek 配置自动导入
+  │   ├─ 从 UserDefaults 恢复 port
   │   └─ turnOn(model:)
-  │       ├─ 创建 DeepSeekClient (持有 apiKey)
-  │       ├─ 创建 RelayHandler (持有 client + thinking)
+  │       ├─ 从 ProviderStore.activeProvider 读配置
+  │       ├─ 创建 ChatClient (通用, 非 DeepSeek 专属)
+  │       ├─ 创建 RelayHandler (注入 ProviderConfig)
   │       ├─ 创建 HTTPServer, 注册路由
   │       │   ├─ GET  /health
   │       │   ├─ GET  /v1/models      (透传 upstream)
   │       │   └─ POST /v1/responses
-  │       └─ 启动 NWListener (端口 8787)
-  │          (不写配置、不拉模型、不动 asar)
+  │       └─ 启动 NWListener (端口: 用户配置, 默认 8787)
   │
   └─ 挂载 MenuBarExtra, 显示菜单栏图标
 ```
 
-启动后直到用户配 Key 前，服务器只是空转。配置和补丁在以下时机触发：
+配置和补丁在以下时机触发：
 
 ```
-用户输入 API Key
-  └─ saveApiKey()
-      └─ Task: fetchModels() → 拉取模型 → 存 UserDefaults
-         (不写配置、不动 asar，等用户主动选模型)
+用户切换提供商
+  └─ switchProvider(id) → turnOff() → turnOn()
+      └─ syncCodexConfig() → CodexConfigManager.enable(provider:, port:)
 
-用户切换模型（启用 iRelay）
-  └─ selectModel(id) → codexEnabled = true
-      └─ syncCodexConfig() → enable()
-          ├─ 写入 ~/.codex/config.toml
-          ├─ 写入 ~/.codex/irelay-models.json
-          └─ 备份 app.asar → 打补丁
+用户切换模型
+  └─ selectModel(id) → syncCodexConfig() → enable()
+      ├─ 写入 ~/.codex/config.toml
+      ├─ 写入 ~/.codex/irelay-models.json (动态, 按 provider 生成)
+      └─ 备份 app.asar → 打补丁
 
 用户关闭 iRelay 模型提供
-  └─ disableCodex() → codexEnabled = false
-      └─ disable()
-          ├─ 恢复 app.asar → 删备份
-          ├─ 清 ~/.codex/config.toml 中 iRelay 配置
-          └─ 删 ~/.codex/irelay-models.json
-
-退出 App
-  └─ turnOff()
-      └─ 停服务器（不做其他清理）
+  └─ disableCodex() → disable()
+      ├─ 恢复 app.asar → 删备份
+      ├─ 清 config.toml 中 iRelay 配置
+      └─ 删 irelay-models.json
 ```
 
 ### 2. 请求处理流程（POST /v1/responses）
 
 ```
-Codex CLI                          iRelay                              DeepSeek API
+Codex CLI                          iRelay                              Upstream API
     │                                │                                      │
     │  POST /v1/responses            │                                      │
-    │  (responses 格式)              │                                      │
     ├───────────────────────────────→│                                      │
     │                                │                                      │
     │                                ├─ RelayHandler.handleResponses()      │
     │                                │   ├─ 解析 responses 请求体           │
     │                                │   ├─ responsesToChatPayload()        │
-    │                                │   │   └─ instructions→system message │
-    │                                │   │      input→user message          │
-    │                                │   │      tools→function tools        │
-    │                                │   │      thinking→thinking param     │
+    │                                │   │   └─ 所有参数透传 + 类型映射     │
+    │                                │   │      工具定义展平                │
+    │                                │   │      thinking/reasoning 按        │
+    │                                │   │      ProviderConfig 注入          │
     │                                │   │                                  │
     │                                │   ├─ 流式?                          │
     │                                │   │  ├─ Yes → handleStream()         │
     │                                │   │  │   ├─ SSE: response.created    │
+    │                                │   │  │   ├─ SSE: response.metadata   │
     │                                │   │  │   ├─ POST /chat/completions ──→│
     │                                │   │  │   │   (stream=true)           │
-    │                                │   │  │   ├─ ← SSE events ←───────────│
-    │                                │   │  │   │   (逐帧转换 delta)        │
+    │                                │   │  │   ├─ ← SSE ←─────────────────│
+    │                                │   │  │   │   (逐帧转换 delta         │
+    │                                │   │  │   │    → reason/工具/文本)     │
     │                                │   │  │   └─ SSE: response.completed  │
+    │                                │   │  │       (含 end_turn + usage)
     │                                │   │  │                                │
     │                                │   │  └─ No → handleNonStream()       │
     │                                │   │      ├─ POST /chat/completions ──→│
@@ -151,269 +162,193 @@ Codex CLI                          iRelay                              DeepSeek 
     │                                │                                      │
 ```
 
-### 3. 协议转换细节
+---
 
-#### 请求转换（Responses API → Chat API）
+## 协议转换
 
-| Responses 字段 | Chat Completions 字段 | 说明 |
+### 请求（Responses API → Chat API）
+
+| Responses 字段 | Chat API 字段 | 行为 |
 |---|---|---|
+| `model` | `model` | 透传 |
 | `instructions` | `messages[0].role=system` | |
-| `input` (string) | `messages[1].role=user` | |
-| `input` (array items) | messages 数组 | 见下方 input 类型映射表 |
+| `input` | `messages` | 按 type 拆解（见下表） |
 | `tools[].name/.description/.parameters` | `tools[].function.name/.../...` | 展平嵌套 |
-| `stream=true` | `stream=true` + `stream_options.include_usage=true` | |
+| `temperature` | `temperature` | 透传 |
+| `top_p` | `top_p` | 透传 |
 | `max_output_tokens` | `max_tokens` | |
-| — | `thinking.type=enabled/disabled` | DeepSeek 推理模式 |
+| `stream` | `stream` + `stream_options.include_usage` | |
+| `tool_choice` | `tool_choice` | 按 `provider.supportsToolChoice` 开关 |
+| `parallel_tool_calls` | `parallel_tool_calls` | 透传 |
+| `reasoning.effort` | `reasoning_effort` | 仅 DeepSeek 模式 |
+| — | `thinking.type=enabled` | DeepSeek 推理模式 |
 
-#### Input 类型映射
+### Input 类型映射
 
-Responses API 的 `input` 数组中的每个 item 按 `type` 字段分类转换：
-
-| Responses `type` | 生成的 Chat Message | 关键字段映射 |
+| Responses `type` | Chat Message | 字段来源 |
 |---|---|---|
-| `message` (role=user) | `{role:"user", content:"..."}` | `item.content[]` → 拼接纯文本 |
-| `message` (role=assistant) | `{role:"assistant", content:"..."}` | 同上 |
+| `message` (user) | `{role:"user", content:"..."}` | `item.content[]` → `contentToText` |
+| `message` (assistant) | `{role:"assistant", content:"..."}` | 同上 |
 | `function_call` | `{role:"assistant", tool_calls:[...]}` | `item.name` / `item.arguments` **顶层字段** |
 | `function_call_output` | `{role:"tool", tool_call_id, content}` | `item.call_id` / `item.output` |
-| `reasoning` | 暂存 `pendingReasoning`，附加到下条 assistant | `item.content` |
+| `reasoning` | 暂存，附加到下条 assistant | `item.content` |
 | `input_text` | `{role:"user", content:"..."}` | `item.text` |
 
-> ⚠️ `function_call` 在 Responses API 中 `name` 和 `arguments` 是**顶层字段**，非嵌套在 `function` 对象里。`collectFunctionCalls()` 曾因此读错，已于 2026-06-15 修复。
-
-#### Tool 定义转换
+### 工具定义转换
 
 ```json
 // Responses API 格式
-{"type":"function", "name":"Edit", "description":"...", "parameters":{...}}
+{"type":"function", "name":"Edit", "description":"Edits files", "parameters":{...}}
 
-// 转 DeepSeek Chat API
-{"type":"function", "function":{"name":"Edit", "description":"...", "parameters":{...}}}
+// 转 Chat API
+{"type":"function", "function":{"name":"Edit", "description":"Edits files", "parameters":{...}}}
 ```
 
-#### 响应转换（Chat API → Responses API）
+### 响应（Chat API SSE → Responses API SSE）
 
-| DeepSeek SSE delta | 产生的 SSE 事件 |
+| SSE 事件 | 触发条件 |
 |---|---|
-| `choices[0].delta.reasoning_content` | `response.reasoning_text.delta` |
-| `choices[0].delta.content` | `response.output_text.delta` / `.done` |
-| `choices[0].delta.tool_calls[].function.arguments` | `response.function_call_arguments.delta` / `.done` |
-| `usage` (流结束) | `response.completed` 中 `usage` 字段 |
-| `choices[0].finish_reason`（非流式） | 触发 `chatCompletionToResponse()` 组装完整响应 |
+| `response.created` | 流开始 |
+| `response.metadata` | 紧随 created，带 `x-codex-turn-state` / `openai-model` |
+| `response.output_item.added` | reasoning / message / function_call item 开始 |
+| `response.content_part.added` | reasoning_text / output_text part 开始 |
+| `response.reasoning_text.delta` | `delta.reasoning_content`（按 `provider.reasoningField`） |
+| `response.output_text.delta` | `delta.content` |
+| `response.function_call_arguments.delta` | `delta.tool_calls[].function.arguments` |
+| `response.output_text.done` | 文本流结束 |
+| `response.content_part.done` | part 完成 |
+| `response.function_call_arguments.done` | tool_call 流结束 |
+| `response.output_item.done` | item 完成 |
+| `response.completed` | 流结束，含 `usage` + `end_turn` |
+| `response.failed` | 异常 |
 
-### 4. Codex 配置与模型菜单适配
-
-Codex 有两条模型相关链路：
-
-1. **Rust app-server 模型目录**：读取 `model_catalog_json`，返回 DeepSeek 模型元数据。
-2. **桌面前端模型菜单**：读取 app-server 返回值后，还会经过远端 Statsig 白名单过滤。
-
-iRelay 启用时写入：
-
-```toml
-model_provider = "iRelay"
-model = "deepseek-v4-flash"
-model_catalog_json = "/Users/admin/.codex/irelay-models.json"
-
-[model_providers.iRelay]
-name = "iRelay"
-base_url = "http://127.0.0.1:8787/v1"
-wire_api = "responses"
-```
-
-`irelay-models.json` 提供完整 `ModelInfo`，包括：
-
-- `slug`
-- `display_name`
-- `supported_reasoning_levels`
-- `default_reasoning_level`
-- `shell_type`
-- `context_window`
-- `truncation_policy`
-- `apply_patch_tool_type`
-
-桌面 App 的前端 Statsig 配置可能包含：
+### usage 格式
 
 ```json
 {
-  "available_models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
-  "use_hidden_models": true
+  "input_tokens": 100,
+  "output_tokens": 200,
+  "total_tokens": 300,
+  "input_tokens_details": {"cached_tokens": 0},
+  "output_tokens_details": {"reasoning_tokens": 0}
 }
 ```
 
-启用 `use_hidden_models` 后，前端只显示白名单模型。DeepSeek 不在白名单中时会被过滤，模型菜单显示为空。
+### 协议覆盖矩阵
 
-`CodexAppPatcher` 会对 `/Applications/Codex.app/Contents/Resources/app.asar` 做等长补丁，将白名单过滤退回为 `hidden=false` 过滤。这样 DeepSeek 仍能显示，且不需要外部 `asar` 工具。首次补丁前会创建：
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| `model` / `instructions` / `input` | ✅ | |
+| `tools` / `tool_choice` / `parallel_tool_calls` | ✅ | |
+| `stream` / `temperature` / `top_p` / `max_output_tokens` | ✅ | |
+| `reasoning.effort` / `thinking` | ✅ | 按 ProviderConfig 注入 |
+| `end_turn` | ✅ | 流结束前发 output_item + completed 携带 |
+| `response.metadata` | ✅ | 带 turn_state / model |
+| SSE 完整事件流 | ✅ | 11 种事件全部覆盖 |
+| `usage` 明细 | ✅ | `input_tokens_details` / `output_tokens_details` |
+| `text` (verbosity / format) | ❌ | Chat API 不支持 |
+| `store` / `service_tier` / `include` | ❌ | OpenAI 平台独有 |
+| `prompt_cache_key` | ❌ | DeepSeek 不支持 |
+| `previous_response_id` | ❌ | 仅 WebSocket 增量会话需要 |
+| `custom_tool_call` input type | ❌ | Codex 极少通过 HTTP 发送 |
 
-```text
-/Applications/Codex.app/Contents/Resources/app.asar.bak.irelay-auto
-```
+---
+
+## ProviderConfig 适配模型
+
+提供商之间的差异通过配置字段描述，不搞协议抽象：
+
+| 字段 | 作用 | DeepSeek | OpenAI |
+|---|---|---|---|
+| `baseURL` | 上游 API 地址 | `api.deepseek.com` | `api.openai.com` |
+| `thinkingMode` | 推理模式 | `.deepseekStyle` (`thinking.type`) | `.none` |
+| `reasoningField` | SSE delta 中推理字段名 | `reasoning_content` | `""` |
+| `supportsToolChoice` | 是否支持 tool_choice | `false` | `true` |
+
+---
+
+## 持久化
+
+| 存储位置 | 内容 | 读写时机 |
+|---|---|---|
+| `UserDefaults` key `irelay_providers` | 多提供商 JSON 数组 | 增删改时全量保存 |
+| `UserDefaults` key `irelay_port` | 服务器端口 | 端口配置时保存 |
+| `~/.codex/config.toml` | Codex 中继配置 | 切模型/提供商时写，关模型时清 |
+| `~/.codex/irelay-models.json` | 模型目录（动态） | 同上 |
+| `/Applications/Codex.app/.../app.asar` | Codex 桌面 App 前端包 | 配 Key/切模型时备份+补丁 |
+| `~/.config/irelay/irelay.log` | 运行日志 | 每行日志异步追加 |
+
+---
+
+## 测试
+
+26 个单元测试覆盖协议转换核心路径：
+
+| 测试组 | 数量 | 覆盖 |
+|---|---|---|
+| `responsesToChatPayload` | 5 | 基础、thinking 开/关、tool_choice 透传 |
+| `chatCompletionToResponse` | 3 | 纯文本、tool_calls、reasoning |
+| `collectFunctionCalls` | 2 | **Responses 格式 + Chat 格式 fallback** |
+| `parseInput` | 5 | 纯文本、system prompt、null、工具历史、reasoning |
+| `contentToText` | 3 | string、nil、数组 |
+| `convertTools` | 2 | 基础、过滤非 function |
+| `ensureToolAfterAssistant` | 1 | 消息重排 |
+| `responseItemToMessage` | 2 | function_call_output、input_text |
+| `ProviderConfig` | 3 | DeepSeek、OpenAI、custom 预设 |
+
+运行：`swift test`
 
 ---
 
 ## 关键设计决策
 
-### 为什么零外部依赖？
+### 零外部依赖
 
 全部基于 Apple 内置框架：
-- **`Network.framework`** — 提供 `NWListener` / `NWConnection`，替代 GCDWebServer 或 Vapor
-- **`Foundation`** — `URLSession` 做 HTTP 客户端，`JSONSerialization` 做 JSON 解析
-- **`SwiftUI`** — `MenuBarExtra` 提供菜单栏 UI
+- **`Network.framework`** — NWListener / NWConnection，替代 Vapor
+- **`Foundation`** — URLSession + JSONSerialization
+- **`SwiftUI`** — MenuBarExtra
 
-动机：减少二进制体积，消除 SPM 依赖冲突，方便维护。
+### 手写 HTTP 解析
 
-### 为什么手写 HTTP 解析？
-
-`NWConnection` 是传输层 API，不提供 HTTP 语义。项目用约 200 行手写了 HTTP/1.1 请求解析（`HTTPServer.parseHTTP`），只支持必要的子集：
-- `GET` / `POST`（Codex 只用这两种）
-- `Content-Length` 请求体（不支持 `Transfer-Encoding: chunked`）
+NWConnection 是传输层 API。项目用约 200 行手写了 HTTP/1.1 请求解析，只支持必要子集：
+- GET / POST
+- Content-Length 请求体
 - 纯文本响应（JSON / SSE）
 
 ### 协议转换的设计取舍
 
-**转换发生在 `RelayHandler`**，而非在 `DeepSeekClient` 中。这是一个明确的职责分离：
-
-- `DeepSeekClient` — 只懂 Chat Completions API，不管格式转换
+**转换在 RelayHandler，不在 ChatClient**：
+- `ChatClient` — 只懂 Chat API，不管格式
 - `RelayHandler` — 只做格式转换，不管 HTTP 传输
-- 这样任何一个都可以独立测试
 
-**Streaming 的适配策略**：把 DeepSeek 的 `data: {...}` SSE stream 通过 `AsyncThrowingStream` 变成异步序列，RelayHandler 逐事件消费、逐帧转换、逐帧推送给 Codex。不缓冲整个响应。
+**Streaming 适配策略**：DeepSeek 的 SSE stream 通过 `AsyncThrowingStream` 变成异步序列，逐帧消费、逐帧转换、逐帧推送。不缓冲整个响应。
 
-### 单文件带来的长函数
-
-`RelayHandler.swift` 约 800 行，`handleStream()` 是其中最长的函数。这是有意为之——整个流式流程是线性叙事（创建 → 逐帧 → 完成），拆成小函数反而让状态机更难跟踪。所有私有辅助方法作为 `private static` 挂在类上，便于测试。
+**提供商适配用标志位，不搞协议**：Chat API 之间的差异很小，3-4 个字段就能描述。
 
 ---
 
-## 数据流
+## 限制
 
-### 状态管理
-
-`RelayState` 是**唯一的状态中心**，使用 `@MainActor` 保证 UI 线程安全：
-
-```
-User Action                    RelayState                     Side Effects
-──────────                    ──────────                     ────────────
-输入 API Key  ──→ saveApiKey(key)  ──→ apiKey = key (didSet 存)
-                                        client?.apiKey = key
-                                        Task: fetchModels()
-                                          └─ 拉取成功 → 存 UserDefaults
-                                             (不写配置、不动 asar)
-
-选择模型    ──→ selectModel(id)   ──→ model = id (didSet 存)
-                                        codexEnabled = true
-                                        syncCodexConfig() → enable()
-                                        ├─ 写 config.toml
-                                        ├─ 写 irelay-models.json
-                                        └─ 备份+修补 app.asar
-
-切换思考    ──→ toggleThinking()   ──→ thinkingEnabled = !... (didSet 存)
-                                        handler?.thinking = ...
-
-关闭 iRelay ──→ disableCodex()    ──→ codexEnabled = false (didSet 存)
-                                        codexConfigManager.disable()
-                                        ├─ 恢复 app.asar → 删备份
-                                        ├─ 清 config.toml 中 iRelay 配置
-                                        └─ 删 irelay-models.json
-
-退出 App    ──→ turnOff()         ──→ stopServer()
-```
-
-### 持久化
-
-| 存储位置 | 内容 | 读写时机 |
-|---|---|---|
-| `UserDefaults` | apiKey / model / thinking / codexEnabled / models | 状态变化时存，`init()` 读 |
-| `~/.codex/config.toml` | Codex 中继配置 | 配 Key / 切模型时写，关模型时清 |
-| `~/.codex/irelay-models.json` | Codex 静态模型目录 | 配 Key / 切模型时写，关模型时删 |
-| `/Applications/Codex.app/Contents/Resources/app.asar` | Codex 桌面 App 前端包 | 配 Key / 切模型时备份+补丁，关模型时恢复 |
-| `~/.config/irelay/irelay.log` | 运行日志 | 每行日志异步追加 |
-
----
-
-## 文件清单
-
-```
-Sources/iRelay/
-├── iRelayApp.swift          # @main 入口，MenuBarExtra，API Key 配置窗口
-├── MenuBarView.swift        # 菜单栏 UI 视图
-├── Models/
-│   ├── RelayState.swift     # 全局状态管理（~200 行）
-│   └── RelayConfig.swift    # ModelInfo 数据模型（~8 行）
-├── Services/
-│   ├── CodexConfigManager.swift  # TOML 配置读写器（~125 行）
-│   ├── CodexAppPatcher.swift     # Codex 桌面 App 白名单补丁器
-│   └── Logger.swift              # 异步文件日志（~53 行）
-└── Core/
-    ├── HTTPServer.swift     # 零依赖 HTTP/1.1 服务器（~215 行）
-    ├── RelayHandler.swift   # 协议转换引擎（~800 行）
-    └── DeepSeekClient.swift # DeepSeek API 客户端（~113 行）
-```
-
-总计约 **1600 行 Swift**。
-
----
-
-### 5. SSE 事件协议对比
-
-与 OpenAI Responses API 的 SSE 事件集对比，iRelay 支持以下事件（✓ = 支持，— = 不适用）：
-
-| 事件 | iRelay | 说明 |
-|------|:------:|------|
-| `response.created` | ✓ | |
-| `response.output_item.added` | ✓ | |
-| `response.output_item.done` | ✓ | |
-| `response.content_part.added` | ✓ | |
-| `response.content_part.done` | ✓ | |
-| `response.output_text.delta` / `.done` | ✓ | |
-| `response.reasoning_text.delta` / `.done` | ✓ | |
-| `response.function_call_arguments.delta` / `.done` | ✓ | |
-| `response.completed` | ✓ | 不含 `end_turn`（Codex 默认 `None`，有 fallback） |
-| `response.failed` | ✓ | |
-| `response.metadata` | — | 携带 turn state / model verification，非必需 |
-| `response.incomplete` | — | DeepSeek 不产生此事件 |
-| `response.reasoning_summary_text.delta` | — | DeepSeek 不支持 reasoning summary |
-| `response.reasoning_summary_part.added` | — | 同上 |
-| `response.custom_tool_call_input.delta` | — | DeepSeek 不支持 custom tools |
-
-### 6. 未使用的 Responses API 参数
-
-以下参数 Codex 在 POST `/v1/responses` 中可能发送，但 iRelay 未转发给 DeepSeek（DeepSeek Chat API 不支持）：
-
-| 参数 | 原因 |
-|---|---|
-| `tool_choice` | DeepSeek 只支持隐式 `auto` |
-| `parallel_tool_calls` | Codex 可并行调工具，但 DeepSeek 无对应参数 |
-| `text` (verbosity / format) | DeepSeek 不支持输出格式控制 |
-| `previous_response_id` | 仅 Responses WebSocket 增量协议需要，iRelay 走独立 HTTP POST |
-| `include` | DeepSeek 无 reasoning.encrypted_content 概念 |
-
-## 限制 & 注意事项
-
-1. **API Key 明文存储** — 存在 `UserDefaults` 而非钥匙串，任何能读 `com.xdf.irelay.plist` 的进程都能拿到
-2. **HTTP 请求解析有限** — 不支持 `Transfer-Encoding: chunked`、`Upgrade` 等，但 Codex 目前用不到
-3. **单请求队列** — 每个 `/v1/responses` 独立发起上游请求，没有连接池或请求排队
-4. **端口硬编码 8787** — 不可配置，冲突时启动失败
-5. **Codex App 补丁依赖前端 bundle 字符串** — Codex App 更新后如果过滤表达式变化，补丁会记录 `pattern_not_found`，需要更新匹配模式
-6. **日志无轮转** — 日志文件持续增长，需要手动清理
+1. **API Key 明文存储** — UserDefaults，非钥匙串
+2. **HTTP 解析有限** — 不支持 `Transfer-Encoding: chunked`
+3. **单请求队列** — 无连接池
+4. **WebSocket 不支持** — Codex 强制 HTTP fallback
+5. **asar 补丁依赖 bundle 字符串** — Codex 更新后表达式可能变化
 
 ## 协议适配历史
 
+### 2026-06-15：v2.0.0 多提供商通用化
+- 新增 `ProviderConfig` / `ProviderStore`，支持任意 Chat API 提供商
+- `DeepSeekClient` → `ChatClient`
+- `RelayHandler` 注入 `ProviderConfig`：thinking/reasoning 动态化
+- 端口可配置
+- UI 增加提供商管理、端口配置
+
 ### 2026-06-15：修复 `collectFunctionCalls` 字段路径
+`item["function"]["name"]` → `item["name"]`，Responses API 中 name/arguments 在顶层。
 
-**问题**：`collectFunctionCalls()` 读取 `item["function"]["name"]`，但 Responses API 的 `function_call` item 中 `name` 和 `arguments` 是**顶层字段**而非嵌套在 `function` 对象里。
-
-**影响**：每次请求中包含历史工具调用时（典型场景：Read 文件 → 编辑文件），DeepSeek 收到空工具名，导致"工具不可用"错误。
-
-**修复**：改为优先读 `item["name"]` / `item["arguments"]`，兼容回退 `item["function"]["name"]`。
-
----
-
-## 本地开发
-
-```bash
-# 构建
-./build.sh
-
-# 产物在 iRelay.app
-# 日志在 ~/.config/irelay/irelay.log
-```
+### 2026-06-15：三个协议补丁
+- usage 补 `input_tokens_details` / `output_tokens_details`
+- 加 `response.metadata` SSE 事件
+- `reasoning.effort` 透传
