@@ -5,6 +5,12 @@ struct MenuBarView: View {
     @ObservedObject var state: RelayState
 
     var body: some View {
+        Button(state.codexEnabled ? "关闭 Codex 集成" : "开启 Codex 集成") {
+            state.toggleCodex()
+        }
+
+        Divider()
+
         ForEach(state.availableModels) { model in
             Button {
                 state.selectModel(model.id)
@@ -37,20 +43,6 @@ struct MenuBarView: View {
 
         Button("密钥设置...") { openApiKeyConfig(state: state) }
         Button("打开日志") { Log.open() }
-
-        Divider()
-
-        Button {
-            state.toggleCodex()
-        } label: {
-            HStack {
-                Text(state.codexEnabled ? "关闭 Codex 集成" : "开启 Codex 集成")
-                Spacer()
-                if !state.codexEnabled {
-                    Image(systemName: "checkmark")
-                }
-            }
-        }
 
         Divider()
 
