@@ -580,13 +580,14 @@ final class RelayHandler {
             let item = items[i]
             guard item["type"] as? String == "function_call" else { break }
             let callID = (item["call_id"] as? String) ?? (item["id"] as? String) ?? "call_" + randomID()
-            let fn = item["function"] as? JSON ?? [:]
+            let name = item["name"] as? String ?? (item["function"] as? JSON)?["name"] as? String ?? ""
+            let arguments = item["arguments"] as? String ?? (item["function"] as? JSON)?["arguments"] as? String ?? "{}"
             calls.append([
                 "id": callID,
                 "type": "function",
                 "function": [
-                    "name": fn["name"] as? String ?? "",
-                    "arguments": fn["arguments"] as? String ?? "{}"
+                    "name": name,
+                    "arguments": arguments
                 ] as JSON
             ])
             i += 1

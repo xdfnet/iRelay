@@ -153,18 +153,52 @@ Codex CLI                          iRelay                              DeepSeek 
 
 ### 3. 协议转换细节
 
-| Responses 字段 | Chat Completions 字段 | 方向 |
+#### 请求转换（Responses API → Chat API）
+
+| Responses 字段 | Chat Completions 字段 | 说明 |
 |---|---|---|
-| `instructions` | `messages[0].role=system` | → |
-| `input` (string) | `messages[1].role=user` | → |
-| `input` (array) | messages 数组（含 tool_call / function_call_output） | → |
-| `tools[].function` | `tools[].function` | → |
-| `stream=true` | `stream=true` + `stream_options.include_usage=true` | → |
-| — | `thinking.type=enabled/disabled` | → |
-| `choices[0].delta.reasoning_content` | → `response.reasoning_text.delta` SSE | ← |
-| `choices[0].delta.content` | → `response.output_text.delta` / `response.output_text.done` | ← |
-| `choices[0].delta.tool_calls` | → `response.function_call_arguments.delta` / `.done` | ← |
-| `usage` | → `response.completed.usage` | ← |
+| `instructions` | `messages[0].role=system` | |
+| `input` (string) | `messages[1].role=user` | |
+| `input` (array items) | messages 数组 | 见下方 input 类型映射表 |
+| `tools[].name/.description/.parameters` | `tools[].function.name/.../...` | 展平嵌套 |
+| `stream=true` | `stream=true` + `stream_options.include_usage=true` | |
+| `max_output_tokens` | `max_tokens` | |
+| — | `thinking.type=enabled/disabled` | DeepSeek 推理模式 |
+
+#### Input 类型映射
+
+Responses API 的 `input` 数组中的每个 item 按 `type` 字段分类转换：
+
+| Responses `type` | 生成的 Chat Message | 关键字段映射 |
+|---|---|---|
+| `message` (role=user) | `{role:"user", content:"..."}` | `item.content[]` → 拼接纯文本 |
+| `message` (role=assistant) | `{role:"assistant", content:"..."}` | 同上 |
+| `function_call` | `{role:"assistant", tool_calls:[...]}` | `item.name` / `item.arguments` **顶层字段** |
+| `function_call_output` | `{role:"tool", tool_call_id, content}` | `item.call_id` / `item.output` |
+| `reasoning` | 暂存 `pendingReasoning`，附加到下条 assistant | `item.content` |
+| `input_text` | `{role:"user", content:"..."}` | `item.text` |
+
+> ⚠️ `function_call` 在 Responses API 中 `name` 和 `arguments` 是**顶层字段**，非嵌套在 `function` 对象里。`collectFunctionCalls()` 曾因此读错，已于 2026-06-15 修复。
+
+#### Tool 定义转换
+
+```json
+// Responses API 格式
+{"type":"function", "name":"Edit", "description":"...", "parameters":{...}}
+
+// 转 DeepSeek Chat API
+{"type":"function", "function":{"name":"Edit", "description":"...", "parameters":{...}}}
+```
+
+#### 响应转换（Chat API → Responses API）
+
+| DeepSeek SSE delta | 产生的 SSE 事件 |
+|---|---|
+| `choices[0].delta.reasoning_content` | `response.reasoning_text.delta` |
+| `choices[0].delta.content` | `response.output_text.delta` / `.done` |
+| `choices[0].delta.tool_calls[].function.arguments` | `response.function_call_arguments.delta` / `.done` |
+| `usage` (流结束) | `response.completed` 中 `usage` 字段 |
+| `choices[0].finish_reason`（非流式） | 触发 `chatCompletionToResponse()` 组装完整响应 |
 
 ### 4. Codex 配置与模型菜单适配
 
@@ -319,6 +353,40 @@ Sources/iRelay/
 
 ---
 
+### 5. SSE 事件协议对比
+
+与 OpenAI Responses API 的 SSE 事件集对比，iRelay 支持以下事件（✓ = 支持，— = 不适用）：
+
+| 事件 | iRelay | 说明 |
+|------|:------:|------|
+| `response.created` | ✓ | |
+| `response.output_item.added` | ✓ | |
+| `response.output_item.done` | ✓ | |
+| `response.content_part.added` | ✓ | |
+| `response.content_part.done` | ✓ | |
+| `response.output_text.delta` / `.done` | ✓ | |
+| `response.reasoning_text.delta` / `.done` | ✓ | |
+| `response.function_call_arguments.delta` / `.done` | ✓ | |
+| `response.completed` | ✓ | 不含 `end_turn`（Codex 默认 `None`，有 fallback） |
+| `response.failed` | ✓ | |
+| `response.metadata` | — | 携带 turn state / model verification，非必需 |
+| `response.incomplete` | — | DeepSeek 不产生此事件 |
+| `response.reasoning_summary_text.delta` | — | DeepSeek 不支持 reasoning summary |
+| `response.reasoning_summary_part.added` | — | 同上 |
+| `response.custom_tool_call_input.delta` | — | DeepSeek 不支持 custom tools |
+
+### 6. 未使用的 Responses API 参数
+
+以下参数 Codex 在 POST `/v1/responses` 中可能发送，但 iRelay 未转发给 DeepSeek（DeepSeek Chat API 不支持）：
+
+| 参数 | 原因 |
+|---|---|
+| `tool_choice` | DeepSeek 只支持隐式 `auto` |
+| `parallel_tool_calls` | Codex 可并行调工具，但 DeepSeek 无对应参数 |
+| `text` (verbosity / format) | DeepSeek 不支持输出格式控制 |
+| `previous_response_id` | 仅 Responses WebSocket 增量协议需要，iRelay 走独立 HTTP POST |
+| `include` | DeepSeek 无 reasoning.encrypted_content 概念 |
+
 ## 限制 & 注意事项
 
 1. **API Key 明文存储** — 存在 `UserDefaults` 而非钥匙串，任何能读 `com.xdf.irelay.plist` 的进程都能拿到
@@ -326,7 +394,17 @@ Sources/iRelay/
 3. **单请求队列** — 每个 `/v1/responses` 独立发起上游请求，没有连接池或请求排队
 4. **端口硬编码 8787** — 不可配置，冲突时启动失败
 5. **Codex App 补丁依赖前端 bundle 字符串** — Codex App 更新后如果过滤表达式变化，补丁会记录 `pattern_not_found`，需要更新匹配模式
-5. **日志无轮转** — 日志文件持续增长，需要手动清理
+6. **日志无轮转** — 日志文件持续增长，需要手动清理
+
+## 协议适配历史
+
+### 2026-06-15：修复 `collectFunctionCalls` 字段路径
+
+**问题**：`collectFunctionCalls()` 读取 `item["function"]["name"]`，但 Responses API 的 `function_call` item 中 `name` 和 `arguments` 是**顶层字段**而非嵌套在 `function` 对象里。
+
+**影响**：每次请求中包含历史工具调用时（典型场景：Read 文件 → 编辑文件），DeepSeek 收到空工具名，导致"工具不可用"错误。
+
+**修复**：改为优先读 `item["name"]` / `item["arguments"]`，兼容回退 `item["function"]["name"]`。
 
 ---
 
