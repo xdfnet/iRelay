@@ -49,7 +49,7 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.0.0"
+    static let version = "2.1.0"
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Self.keychainKey) ?? ""
