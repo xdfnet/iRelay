@@ -129,6 +129,15 @@ public final class RelayHandler {
             ] as JSON
         ])
 
+        // response.metadata（可选，Codex 用于提取 turn state / model verification）
+        conn.sendSSEJSON(event: "response.metadata", json: [
+            "type": "response.metadata",
+            "headers": [
+                "x-codex-turn-state": responseID,
+                "openai-model": model
+            ] as JSON
+        ])
+
         Task {
             var messageID = ""
             var messageOutputIndex = -1
@@ -399,7 +408,9 @@ public final class RelayHandler {
                     "usage": [
                         "input_tokens": usage["prompt_tokens"] ?? 0,
                         "output_tokens": usage["completion_tokens"] ?? 0,
-                        "total_tokens": usage["total_tokens"] ?? 0
+                        "total_tokens": usage["total_tokens"] ?? 0,
+                        "input_tokens_details": ["cached_tokens": 0],
+                        "output_tokens_details": ["reasoning_tokens": usage["completion_tokens"] ?? 0]
                     ]
                 ]) { $1 }
             }
@@ -460,6 +471,9 @@ public final class RelayHandler {
         switch provider.thinkingMode {
         case .deepseekStyle:
             payload["thinking"] = ["type": "enabled"] as JSON
+            if let reasoning = body["reasoning"] as? JSON, let effort = reasoning["effort"] {
+                payload["reasoning_effort"] = effort
+            }
         case .none:
             break
         }
@@ -530,7 +544,9 @@ public final class RelayHandler {
             response["usage"] = [
                 "input_tokens": usage["prompt_tokens"] ?? 0,
                 "output_tokens": usage["completion_tokens"] ?? 0,
-                "total_tokens": usage["total_tokens"] ?? 0
+                "total_tokens": usage["total_tokens"] ?? 0,
+                "input_tokens_details": ["cached_tokens": 0],
+                "output_tokens_details": ["reasoning_tokens": usage["completion_tokens"] ?? 0]
             ] as JSON
         }
 
