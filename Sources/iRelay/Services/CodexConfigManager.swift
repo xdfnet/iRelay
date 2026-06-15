@@ -20,14 +20,13 @@ final class CodexConfigManager {
         configDir.appendingPathComponent("irelay-models.json")
     }
 
-    /// 写入 model_provider + model，告诉 Codex 用 iRelay
     @discardableResult
-    func enable(provider: ProviderConfig, port: UInt16) -> Bool {
+    func enable(model: String, port: UInt16) -> Bool {
         let raw = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
-        let next = configureCodexTOML(raw, provider: provider, port: port)
+        let next = configureCodexTOML(raw, model: model, port: port)
         do {
             try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-            try modelCatalogData(for: provider).write(to: modelCatalogPath, options: .atomic)
+            try modelCatalogData().write(to: modelCatalogPath, options: .atomic)
             try next.write(to: configPath, atomically: true, encoding: .utf8)
             patchAppAsar()
             return true
@@ -37,7 +36,6 @@ final class CodexConfigManager {
         }
     }
 
-    /// 移除 iRelay 配置，Codex 回退默认
     @discardableResult
     func disable() -> Bool {
         restoreAppAsar()
@@ -50,9 +48,7 @@ final class CodexConfigManager {
     }
 
     @discardableResult
-    func patchAppAsar() -> Bool {
-        appPatcher.ensurePatched()
-    }
+    func patchAppAsar() -> Bool { appPatcher.ensurePatched() }
 
     @discardableResult
     func restoreAppAsar() -> Bool {
@@ -63,13 +59,13 @@ final class CodexConfigManager {
 
     // MARK: - TOML
 
-    private func configureCodexTOML(_ existing: String, provider: ProviderConfig, port: UInt16) -> String {
+    private func configureCodexTOML(_ existing: String, model: String, port: UInt16) -> String {
         var body = removeTopLevelModelKeys(existing)
         body = removeIRelaySection(body)
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var result = "model_provider = \"iRelay\"\n"
-        result += "model = \"\(provider.defaultModel)\"\n"
+        result += "model = \"\(model)\"\n"
         result += "model_catalog_json = \"\(tomlEscaped(modelCatalogPath.path))\""
         if !trimmed.isEmpty {
             result += "\n\n" + trimmed
@@ -118,9 +114,7 @@ final class CodexConfigManager {
                 result.append(line)
                 continue
             }
-            if !inTarget {
-                result.append(line)
-            }
+            if !inTarget { result.append(line) }
         }
         return result.joined(separator: "\n")
     }
@@ -138,18 +132,19 @@ final class CodexConfigManager {
 
     // MARK: - Model catalog
 
-    private func modelCatalogData(for provider: ProviderConfig) throws -> Data {
-        let models = provider.models.enumerated().map { i, m in
-            modelInfo(m.id, desc: m.description, priority: i, provider: provider)
+    private func modelCatalogData() throws -> Data {
+        let models = RelayState.loadModels().enumerated().map { i, m in
+            modelInfo(m.id, desc: m.description, priority: i)
         }
         let catalog: [String: Any] = ["models": models.isEmpty
-            ? [modelInfo(provider.defaultModel, desc: provider.name, priority: 0, provider: provider)]
+            ? [modelInfo("deepseek-v4-pro", desc: "DeepSeek V4 Pro", priority: 0),
+               modelInfo("deepseek-v4-flash", desc: "DeepSeek V4 Flash", priority: 1)]
             : models
         ]
         return try JSONSerialization.data(withJSONObject: catalog, options: [.prettyPrinted, .sortedKeys])
     }
 
-    private func modelInfo(_ id: String, desc: String, priority: Int, provider: ProviderConfig) -> [String: Any] {
+    private func modelInfo(_ id: String, desc: String, priority: Int) -> [String: Any] {
         [
             "slug": id,
             "display_name": id,
@@ -165,18 +160,18 @@ final class CodexConfigManager {
             "visibility": "list",
             "supported_in_api": true,
             "priority": priority,
-            "base_instructions": provider.baseInstructions,
+            "base_instructions": "You are a helpful AI assistant powered by DeepSeek.",
             "supports_reasoning_summaries": false,
             "support_verbosity": false,
             "default_verbosity": "low",
             "apply_patch_tool_type": "freeform",
             "supports_parallel_tool_calls": true,
-            "context_window": provider.contextWindow,
-            "max_context_window": provider.contextWindow,
+            "context_window": 1_000_000,
+            "max_context_window": 1_000_000,
             "effective_context_window_percent": 95,
             "input_modalities": ["text"],
             "experimental_supported_tools": [],
-            "truncation_policy": ["mode": "tokens", "limit": provider.contextWindow]
+            "truncation_policy": ["mode": "tokens", "limit": 1_000_000]
         ]
     }
 

@@ -11,57 +11,82 @@ enum RelayStatus: Equatable {
 @MainActor
 final class RelayState: ObservableObject {
     @Published var status: RelayStatus = .stopped
-    @Published var providerStore = ProviderStore()
+    @Published var model: String = "deepseek-v4-pro" {
+        didSet { UserDefaults.standard.set(model, forKey: Self.modelKey) }
+    }
+    @Published var availableModels: [ModelInfo] = RelayState.loadModels()
+    @Published var thinkingEnabled: Bool {
+        didSet { UserDefaults.standard.set(thinkingEnabled, forKey: Self.thinkingKey) }
+    }
+    @Published var apiKey: String = "" {
+        didSet { UserDefaults.standard.set(apiKey, forKey: Self.keychainKey) }
+    }
+    @Published var codexEnabled: Bool {
+        didSet { UserDefaults.standard.set(codexEnabled, forKey: Self.codexKey) }
+    }
     @Published var port: UInt16 {
         didSet { UserDefaults.standard.set(port, forKey: Self.portKey) }
     }
+    var upstream: String = "https://api.deepseek.com"
 
-    var model: String { providerStore.activeProvider?.defaultModel ?? "deepseek-v4-pro" }
-    var thinkingEnabled: Bool = true
-    var apiKey: String { providerStore.activeProvider?.apiKey ?? "" }
-    var availableModels: [ModelInfo] { providerStore.activeProvider?.models ?? [] }
-    var codexEnabled: Bool = true
-
+    private static let keychainKey = "irelay_apiKey"
+    static let modelKey = "irelay_model"
+    private static let thinkingKey = "irelay_thinking"
+    private static let codexKey = "irelay_codexEnabled"
     private static let portKey = "irelay_port"
+
+    private static func saveModels(_ models: [ModelInfo]) {
+        guard let data = try? JSONEncoder().encode(models) else { return }
+        UserDefaults.standard.set(data, forKey: "irelay_models")
+    }
+
+    nonisolated static func loadModels() -> [ModelInfo] {
+        guard let data = UserDefaults.standard.data(forKey: "irelay_models"),
+              let models = try? JSONDecoder().decode([ModelInfo].self, from: data),
+              !models.isEmpty
+        else {
+            return [
+                ModelInfo(id: "deepseek-v4-pro", description: "DeepSeek V4 Pro"),
+                ModelInfo(id: "deepseek-v4-flash", description: "DeepSeek V4 Flash"),
+            ]
+        }
+        return models
+    }
 
     let codexConfigManager = CodexConfigManager()
     static let version = "2.0.0"
 
     init() {
+        apiKey = UserDefaults.standard.string(forKey: Self.keychainKey) ?? ""
+        model = UserDefaults.standard.string(forKey: Self.modelKey) ?? "deepseek-v4-pro"
+        thinkingEnabled = UserDefaults.standard.object(forKey: Self.thinkingKey) as? Bool ?? true
+        codexEnabled = UserDefaults.standard.object(forKey: Self.codexKey) as? Bool ?? true
         port = UInt16(UserDefaults.standard.integer(forKey: Self.portKey))
         if port == 0 { port = 8787 }
-        // ProviderStore init 已处理 v1 迁移
-        if let p = providerStore.activeProvider {
-            thinkingEnabled = p.supportsThinking
-        }
-        turnOn(model: providerStore.activeProvider?.defaultModel ?? "deepseek-v4-pro")
+        turnOn(model: model)
     }
 
     private var server: HTTPServer?
     private var client: ChatClient?
     private var handler: RelayHandler?
-
+    private var codexEnableSkippedForMissingKey = false
     var isOn: Bool { status == .running || status == .starting }
 
-    // MARK: - 服务生命周期
-
     func turnOn(model: String) {
-        guard let provider = providerStore.activeProvider else { return }
+        self.model = model
         guard status == .stopped else { return }
         status = .starting
-        Log.info("service_starting", "model", model, "provider", provider.name, "port", port)
+        Log.info("service_starting", "model", model, "port", port)
 
-        guard let upstreamURL = URL(string: provider.baseURL) else {
-            Log.error("config_invalid", "key", "upstream", "value", provider.baseURL)
+        guard let upstreamURL = URL(string: upstream) else {
+            Log.error("config_invalid", "key", "upstream", "value", upstream)
             status = .stopped
             return
         }
 
-        let c = ChatClient(apiKey: provider.apiKey, baseURL: upstreamURL)
+        let c = ChatClient(apiKey: apiKey, baseURL: upstreamURL)
         client = c
-        var prov = provider
-        if !model.isEmpty { prov.defaultModel = model }
-        let h = RelayHandler(client: c, provider: prov)
+        let h = RelayHandler(client: c, provider: .deepSeek)
         handler = h
 
         let httpServer = HTTPServer()
@@ -87,75 +112,52 @@ final class RelayState: ObservableObject {
         status = .stopped
     }
 
-    // MARK: - 提供商切换
-
-    func switchProvider(_ id: String) {
-        providerStore.setActive(id)
-        thinkingEnabled = providerStore.activeProvider?.supportsThinking ?? false
-        turnOff()
-        if let p = providerStore.activeProvider {
-            turnOn(model: p.defaultModel)
-            syncCodexConfig(provider: p)
-        }
-        Log.info("provider_switched", "provider", providerStore.activeProvider?.name ?? id)
-    }
-
-    // MARK: - 模型
-
     func selectModel(_ id: String) {
-        guard var p = providerStore.activeProvider else { return }
-        p.defaultModel = id
-        providerStore.updateProvider(p)
+        model = id
         if apiKey.isEmpty {
             codexEnabled = false
             Log.error("codex_config_skip", "reason", "empty_api_key", "model", id)
         } else {
             codexEnabled = true
-            syncCodexConfig(provider: p)
+            syncCodexConfig()
         }
         Log.info("model_switched", "model", id)
     }
 
     func disableCodex() {
+        codexEnableSkippedForMissingKey = false
         codexEnabled = false
         codexConfigManager.disable()
         Log.info("codex_config_disabled")
     }
 
-    // MARK: - 思考
-
-    func toggleThinking() {
-        setThinking(!thinkingEnabled)
-    }
+    func toggleThinking() { setThinking(!thinkingEnabled) }
 
     func setThinking(_ enabled: Bool) {
         thinkingEnabled = enabled
-        handler?.provider = providerStore.activeProvider ?? .deepSeek
+        var p = ProviderConfig.deepSeek
+        p.thinkingMode = enabled ? .deepseekStyle : .none
+        handler?.provider = p
         Log.info("thinking_toggled", "enabled", thinkingEnabled)
     }
 
-    // MARK: - API Key
-
     func saveApiKey(_ key: String) -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, var p = providerStore.activeProvider else { return false }
-        p.apiKey = trimmed
-        providerStore.updateProvider(p)
+        guard !trimmed.isEmpty else { return false }
+        apiKey = trimmed
         client?.apiKey = trimmed
         if isOn {
             Task { await fetchModels() }
         }
-        Log.info("api_key_updated", "provider", p.name)
+        Log.info("api_key_updated")
         return true
     }
 
-    // MARK: - 模型列表
-
     func fetchModels() async {
-        guard let p = providerStore.activeProvider, !p.apiKey.isEmpty else { return }
-        guard let url = URL(string: p.baseURL + "/v1/models") else { return }
+        guard !apiKey.isEmpty else { return }
+        guard let url = URL(string: upstream + "/v1/models") else { return }
         var req = URLRequest(url: url)
-        req.setValue("Bearer \(p.apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         guard let (data, _) = try? await URLSession.shared.data(for: req),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let dataList = json["data"] as? [[String: Any]]
@@ -165,12 +167,10 @@ final class RelayState: ObservableObject {
             let desc = item["description"] as? String ?? ""
             return ModelInfo(id: id, description: desc)
         }
-        guard !models.isEmpty, var p = providerStore.activeProvider else { return }
-        p.models = models
-        providerStore.updateProvider(p)
+        guard !models.isEmpty else { return }
+        availableModels = models
+        Self.saveModels(models)
     }
-
-    // MARK: - Private
 
     private func stopServer() {
         server?.stop()
@@ -179,18 +179,20 @@ final class RelayState: ObservableObject {
         handler = nil
     }
 
-    private func syncCodexConfig(provider: ProviderConfig) {
+    private func syncCodexConfig() {
         guard codexEnabled else {
             codexConfigManager.disable()
             return
         }
-        guard !provider.apiKey.isEmpty else {
+        guard !apiKey.isEmpty else {
             Log.error("codex_config_skip", "reason", "empty_api_key")
+            codexEnableSkippedForMissingKey = true
             codexEnabled = false
             return
         }
-        if codexConfigManager.enable(provider: provider, port: port) {
-            Log.info("codex_config_enabled", "provider", provider.name, "model", provider.defaultModel)
+        if codexConfigManager.enable(model: model, port: port) {
+            codexEnableSkippedForMissingKey = false
+            Log.info("codex_config_enabled", "model", model)
         }
     }
 }
