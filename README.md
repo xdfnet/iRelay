@@ -5,7 +5,7 @@
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> 纯原生 macOS 菜单栏 App — Codex ↔ DeepSeek 本机中转服务。
+> 纯原生 macOS 菜单栏 App — Codex ↔ 任意 LLM 本机中转服务。
 >
 > 纯 Swift 实现，**零外部依赖**。服务随 App 启停，无需手动管理。
 
@@ -13,12 +13,13 @@
 
 | 功能 | 说明 |
 |------|------|
-| 模型切换 | 从 DeepSeek API 实时获取模型列表，选中即写入 Codex 配置 |
-| 思考模式 | DeepSeek 推理模式开关，即时生效 |
-| API Key | 窗口配置，明文显示，存 UserDefaults |
-| 自动启动 | 随 App 自动运行中转服务 |
+| 多提供商 | 支持任意 OpenAI Chat API 兼容提供商（DeepSeek、OpenAI、vLLM、Together、Groq、Ollama 等） |
+| 模型切换 | 从上游 API 实时获取模型列表，选中即写入 Codex 配置 |
+| 思考模式 | 按提供商能力开关推理模式 |
+| API Key | 窗口配置，支持每个提供商独立 Key |
+| 端口配置 | 菜单栏可配，无需硬编码 |
 | 模型元数据 | 自动为 Codex 提供完整模型信息（context_window、shell_type 等），消除 fallback 警告 |
-| Codex App 适配 | 自动修补 Codex 桌面 App 的模型白名单过滤，让 DeepSeek 显示在模型菜单中 |
+| Codex App 适配 | 自动修补 Codex 桌面 App 的模型白名单过滤，让非 OpenAI 模型显示在模型菜单中 |
 
 ## 要求
 
@@ -67,20 +68,22 @@ open iRelay.app               # 启动
 
 ```
 MenuBarExtra (SwiftUI)
-  ├─ 模型 / 模式 / 配置 / 退出
+  ├─ 提供商 / 模型 / 模式 / 配置 / 退出
+  ├─ ProviderStore  — 多提供商配置持久化（UserDefaults）
+  │   └─ v1 迁移（旧版 DeepSeek 配置自动导入）
   ├─ CodexConfigManager — ~/.codex/config.toml
-  │   ├─ 写入 model_catalog_json，让 Codex 正确识别 DeepSeek 模型
+  │   ├─ 写入 model_catalog_json，让 Codex 正确识别各提供商模型
   │   └─ CodexAppPatcher — 修补桌面 App 模型白名单过滤
   └─ HTTPServer         — 内嵌 HTTP 服务器
-      └─ RelayHandler   — 路由 + 协议转换
-          └─ DeepSeekClient — DeepSeek API 调用
+      └─ RelayHandler   — 路由 + 协议转换（注入 ProviderConfig）
+          └─ ChatClient — Chat Completions API 客户端
 ```
 
 - **HTTPServer**: 基于 Network.framework (NWListener)，零外部依赖
 - **RelayHandler**: 路由 `/health` `/v1/models` `/v1/responses`，协议转换
-- **DeepSeekClient**: URLSession + async/await，支持流式 SSE
+- **ChatClient**: URLSession + async/await，支持流式 SSE
+- **ProviderStore**: 多提供商管理，UserDefaults 持久化，v1 自动迁移
 - **CodexConfigManager**: 配 Key/切模型时写入 `model_provider = "iRelay"`、当前模型、`model_catalog_json`；关模型时清理
-- **CodexAppPatcher**: 配 Key/切模型时备份并修补 `/Applications/Codex.app/Contents/Resources/app.asar`；关模型时恢复并删备份
 
 ## 目录结构
 
@@ -89,15 +92,18 @@ Sources/iRelay/
 ├── iRelayApp.swift              # @main 入口，MenuBarExtra + 配置窗口
 ├── MenuBarView.swift            # 菜单栏下拉 UI
 ├── Models/
+│   ├── ProviderConfig.swift     # 提供商配置 + 预设工厂
 │   ├── RelayConfig.swift        # ModelInfo 数据模型
 │   └── RelayState.swift         # @Observable 全局状态
 ├── Services/
+│   ├── ProviderStore.swift      # 多提供商持久化存储
 │   ├── CodexConfigManager.swift # ~/.codex/config.toml 和模型 catalog 管理
-│   └── CodexAppPatcher.swift    # Codex 桌面 App 模型菜单补丁
+│   ├── CodexAppPatcher.swift    # Codex 桌面 App 模型菜单补丁
+│   └── Logger.swift             # 异步文件日志
 └── Core/
     ├── HTTPServer.swift         # 内嵌 HTTP 服务器 (NWListener)
     ├── RelayHandler.swift       # 路由分发 + 协议转换
-    └── DeepSeekClient.swift     # DeepSeek API 客户端
+    └── ChatClient.swift         # Chat Completions API 客户端
 ```
 
 ## Codex 桌面 App 适配

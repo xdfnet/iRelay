@@ -7,12 +7,12 @@ typealias JSON = [String: Any]
 // MARK: - RelayHandler
 
 final class RelayHandler {
-    let client: DeepSeekClient
-    var thinking: Bool
+    let client: ChatClient
+    var provider: ProviderConfig
 
-    init(client: DeepSeekClient, thinking: Bool) {
+    init(client: ChatClient, provider: ProviderConfig) {
         self.client = client
-        self.thinking = thinking
+        self.provider = provider
     }
 
     func register(on server: HTTPServer) {
@@ -63,7 +63,7 @@ final class RelayHandler {
             "instructions", instructions.isEmpty ? "" : Log.summaryInput(instructions),
             "max_tokens", maxTokens)
 
-        guard let payload = Self.responsesToChatPayload(body, thinking: thinking) else {
+        guard let payload = Self.responsesToChatPayload(body, provider: provider) else {
             Log.error("request_parse_failed", "model", model, "duration_ms", Log.msSince(start))
             conn.sendJSON(status: 400, body: ["error": "invalid request format"])
             return
@@ -90,7 +90,7 @@ final class RelayHandler {
                     Log.end()
                     return
                 }
-                let resp = Self.chatCompletionToResponse(chat, model: model, thinking: thinking)
+                let resp = Self.chatCompletionToResponse(chat, model: model, provider: provider)
                 let usage = resp["usage"] as? JSON ?? [:]
                 let outputText = resp["output_text"] as? String ?? ""
                 Log.info("response",
@@ -156,7 +156,7 @@ final class RelayHandler {
                     guard let delta = Self.firstChoiceDelta(event) else { continue }
 
                     // reasoning_content delta
-                    if thinking, let reasoningText = delta["reasoning_content"] as? String, !reasoningText.isEmpty {
+                    if provider.supportsThinking, let reasoningText = delta[provider.reasoningField] as? String, !reasoningText.isEmpty {
                         if !rsStarted {
                             rsStarted = true
                             rsID = "rs_" + randomID()
@@ -198,7 +198,7 @@ final class RelayHandler {
                     // content delta
                     if let text = delta["content"] as? String, !text.isEmpty {
                         if !textStarted {
-                            if thinking && rsStarted {
+                    if provider.supportsThinking && rsStarted {
                                 Self.finalizeReasoning(conn: conn, rsID: rsID, rsOutputIndex: rsOutputIndex, rsContent: rsContent, outputItems: &outputItems)
                                 rsStarted = false
                             }
@@ -296,7 +296,7 @@ final class RelayHandler {
             // ---- 以下是正常完成流程 ----
 
             // 完成处理
-            if thinking && rsStarted {
+            if provider.supportsThinking && rsStarted {
                 Self.finalizeReasoning(conn: conn, rsID: rsID, rsOutputIndex: rsOutputIndex, rsContent: rsContent, outputItems: &outputItems)
             }
 
@@ -361,6 +361,26 @@ final class RelayHandler {
             }
 
             // response.completed
+            let turnID = "turn_" + randomID()
+            let turnOutputIndex = nextOutputIndex
+            nextOutputIndex += 1
+            let turnItem: JSON = [
+                "id": turnID,
+                "type": "end_turn",
+                "status": "completed"
+            ]
+            conn.sendSSEJSON(event: "response.output_item.added", json: [
+                "type": "response.output_item.added",
+                "output_index": turnOutputIndex,
+                "item": turnItem
+            ])
+            conn.sendSSEJSON(event: "response.output_item.done", json: [
+                "type": "response.output_item.done",
+                "output_index": turnOutputIndex,
+                "item": turnItem
+            ])
+            outputItems[turnOutputIndex] = turnItem
+
             let output = sortedOutputItems(outputItems)
             var completed: JSON = [
                 "type": "response.completed",
@@ -370,7 +390,8 @@ final class RelayHandler {
                     "status": "completed",
                     "model": upstreamModel,
                     "output": output,
-                    "output_text": accumulated
+                    "output_text": accumulated,
+                    "end_turn": true
                 ] as JSON
             ]
             if let usage = lastUsage {
@@ -400,8 +421,8 @@ final class RelayHandler {
 
     // MARK: - 转换逻辑（移植自 Go responses.go）
 
-    /// Codex Responses 请求 → DeepSeek Chat 请求
-    static func responsesToChatPayload(_ body: JSON, thinking: Bool) -> JSON? {
+    /// Codex Responses 请求 → Chat API 请求
+    static func responsesToChatPayload(_ body: JSON, provider: ProviderConfig) -> JSON? {
         let instructions = body["instructions"] as? String ?? ""
         let rawInput = body["input"]
         let tools = body["tools"] as? [JSON] ?? []
@@ -425,29 +446,36 @@ final class RelayHandler {
         if let p = topP { payload["top_p"] = p }
         if let m = maxTokens { payload["max_tokens"] = m }
         if !tools.isEmpty { payload["tools"] = convertTools(tools) }
+        if provider.supportsToolChoice, let toolChoice = body["tool_choice"] {
+            payload["tool_choice"] = toolChoice
+        }
+        if let parallel = body["parallel_tool_calls"] as? Bool {
+            payload["parallel_tool_calls"] = parallel
+        }
         if stream {
             payload["stream"] = true
             payload["stream_options"] = ["include_usage": true] as JSON
         }
 
-        if thinking {
+        switch provider.thinkingMode {
+        case .deepseekStyle:
             payload["thinking"] = ["type": "enabled"] as JSON
-        } else {
-            payload["thinking"] = ["type": "disabled"] as JSON
+        case .none:
+            break
         }
 
         return payload
     }
 
     /// Chat Completion 响应 → Codex Responses 格式
-    static func chatCompletionToResponse(_ chat: JSON, model: String, thinking: Bool) -> JSON {
+    static func chatCompletionToResponse(_ chat: JSON, model: String, provider: ProviderConfig) -> JSON {
         let message = firstChoiceMessage(chat)
         let text = message["content"] as? String ?? ""
         let modelName = chat["model"] as? String ?? model
 
         var output: [JSON] = []
 
-        if thinking, let reasoning = message["reasoning_content"] as? String, !reasoning.isEmpty {
+        if provider.supportsThinking, let reasoning = message[provider.reasoningField] as? String, !reasoning.isEmpty {
             output.append([
                 "id": "rs_" + randomID(),
                 "type": "reasoning",

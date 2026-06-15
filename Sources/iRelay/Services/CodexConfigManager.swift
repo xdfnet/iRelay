@@ -21,12 +21,12 @@ final class CodexConfigManager {
 
     /// 写入 model_provider + model，告诉 Codex 用 iRelay
     @discardableResult
-    func enable(model: String) -> Bool {
+    func enable(provider: ProviderConfig, port: UInt16) -> Bool {
         let raw = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
-        let next = configureCodexTOML(raw, model: model)
+        let next = configureCodexTOML(raw, provider: provider, port: port)
         do {
             try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-            try modelCatalogData().write(to: modelCatalogPath, options: .atomic)
+            try modelCatalogData(for: provider).write(to: modelCatalogPath, options: .atomic)
             try next.write(to: configPath, atomically: true, encoding: .utf8)
             patchAppAsar()
             return true
@@ -39,25 +39,20 @@ final class CodexConfigManager {
     /// 移除 iRelay 配置，Codex 回退默认
     @discardableResult
     func disable() -> Bool {
-        // 恢复 asar + 删备份
         restoreAppAsar()
-        // 清理 config.toml
         if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
             let next = disableCodexTOML(raw)
             try? next.write(to: configPath, atomically: true, encoding: .utf8)
         }
-        // 清理模型目录
         try? FileManager.default.removeItem(at: modelCatalogPath)
         return true
     }
 
-    /// 备份并打补丁（app 启动时调用）
     @discardableResult
     func patchAppAsar() -> Bool {
         appPatcher.ensurePatched()
     }
 
-    /// 恢复备份并删除备份文件（app 退出时调用）
     @discardableResult
     func restoreAppAsar() -> Bool {
         let ok = appPatcher.restoreIfPossible()
@@ -65,35 +60,32 @@ final class CodexConfigManager {
         return ok
     }
 
-    // MARK: - TOML 操作
+    // MARK: - TOML
 
-    /// 写配置：顶层 key 放最上面，provider 块放最下面，不加注释
-    private func configureCodexTOML(_ existing: String, model: String) -> String {
+    private func configureCodexTOML(_ existing: String, provider: ProviderConfig, port: UInt16) -> String {
         var body = removeTopLevelModelKeys(existing)
         body = removeIRelaySection(body)
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var result = "model_provider = \"iRelay\"\n"
-        result += "model = \"\(model)\"\n"
+        result += "model = \"\(provider.defaultModel)\"\n"
         result += "model_catalog_json = \"\(tomlEscaped(modelCatalogPath.path))\""
         if !trimmed.isEmpty {
             result += "\n\n" + trimmed
         }
         result += "\n\n[model_providers.iRelay]\n"
         result += "name = \"iRelay\"\n"
-        result += "base_url = \"http://127.0.0.1:8787/v1\"\n"
+        result += "base_url = \"http://127.0.0.1:\(port)/v1\"\n"
         result += "wire_api = \"responses\"\n"
         return result
     }
 
-    /// 删配置：移除所有 iRelay 相关行，不保留注释
     private func disableCodexTOML(_ existing: String) -> String {
         var result = removeTopLevelModelKeys(existing)
         result = removeIRelaySection(result)
         return result.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 
-    /// 移除顶层 model_provider / model 行
     private func removeTopLevelModelKeys(_ toml: String) -> String {
         var currentTable = ""
         var lines: [String] = []
@@ -110,7 +102,6 @@ final class CodexConfigManager {
         return lines.joined(separator: "\n")
     }
 
-    /// 移除 [model_providers.iRelay] 整个 section
     private func removeIRelaySection(_ toml: String) -> String {
         let target = "[model_providers.iRelay]"
         var result: [String] = []
@@ -144,19 +135,20 @@ final class CodexConfigManager {
         return String(trimmed[..<equals]).trimmingCharacters(in: .whitespaces)
     }
 
-    private func modelCatalogData() throws -> Data {
-        let models = RelayState.loadModels().enumerated().map { i, m in
-            modelInfo(m.id, desc: m.description, priority: i)
+    // MARK: - Model catalog
+
+    private func modelCatalogData(for provider: ProviderConfig) throws -> Data {
+        let models = provider.models.enumerated().map { i, m in
+            modelInfo(m.id, desc: m.description, priority: i, provider: provider)
         }
         let catalog: [String: Any] = ["models": models.isEmpty
-            ? [modelInfo("deepseek-v4-pro", desc: "DeepSeek V4 Pro", priority: 0),
-               modelInfo("deepseek-v4-flash", desc: "DeepSeek V4 Flash", priority: 1)]
+            ? [modelInfo(provider.defaultModel, desc: provider.name, priority: 0, provider: provider)]
             : models
         ]
         return try JSONSerialization.data(withJSONObject: catalog, options: [.prettyPrinted, .sortedKeys])
     }
 
-    private func modelInfo(_ id: String, desc: String, priority: Int) -> [String: Any] {
+    private func modelInfo(_ id: String, desc: String, priority: Int, provider: ProviderConfig) -> [String: Any] {
         [
             "slug": id,
             "display_name": id,
@@ -172,18 +164,18 @@ final class CodexConfigManager {
             "visibility": "list",
             "supported_in_api": true,
             "priority": priority,
-            "base_instructions": "You are a helpful AI assistant powered by DeepSeek.",
+            "base_instructions": provider.baseInstructions,
             "supports_reasoning_summaries": false,
             "support_verbosity": false,
             "default_verbosity": "low",
             "apply_patch_tool_type": "freeform",
             "supports_parallel_tool_calls": true,
-            "context_window": 1_000_000,
-            "max_context_window": 1_000_000,
+            "context_window": provider.contextWindow,
+            "max_context_window": provider.contextWindow,
             "effective_context_window_percent": 95,
             "input_modalities": ["text"],
             "experimental_supported_tools": [],
-            "truncation_policy": ["mode": "tokens", "limit": 1_000_000]
+            "truncation_policy": ["mode": "tokens", "limit": provider.contextWindow]
         ]
     }
 

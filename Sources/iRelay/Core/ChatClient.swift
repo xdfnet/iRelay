@@ -1,7 +1,7 @@
 import Foundation
 
-/// DeepSeek Chat API 客户端
-final class DeepSeekClient {
+/// OpenAI Chat Completions API 客户端
+final class ChatClient {
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 120
@@ -24,10 +24,12 @@ final class DeepSeekClient {
         }
     }
     let baseURL: URL
+    let chatEndpoint: String
 
-    init(apiKey: String, baseURL: URL) {
+    init(apiKey: String, baseURL: URL, chatEndpoint: String = "/chat/completions") {
         self.apiKeyStorage = apiKey
         self.baseURL = baseURL
+        self.chatEndpoint = chatEndpoint
     }
 
     // MARK: - 非流式请求
@@ -40,7 +42,7 @@ final class DeepSeekClient {
         let http = response as! HTTPURLResponse
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw DeepSeekError.invalidResponse
+            throw ChatError.invalidResponse
         }
         return (json, http.statusCode)
     }
@@ -60,7 +62,7 @@ final class DeepSeekClient {
                     guard http.statusCode == 200 else {
                         let data = try? await bytes.reduce(into: Data()) { $0.append($1) }
                         let msg = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-                        continuation.finish(throwing: DeepSeekError.upstreamError(http.statusCode, msg?["error"]))
+                        continuation.finish(throwing: ChatError.upstreamError(http.statusCode, msg?["error"]))
                         return
                     }
 
@@ -85,7 +87,7 @@ final class DeepSeekClient {
     // MARK: - Helpers
 
     private func makeRequest(_ payload: [String: Any]) throws -> URLRequest {
-        let url = baseURL.appendingPathComponent("/chat/completions")
+        let url = baseURL.appendingPathComponent(chatEndpoint)
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -94,7 +96,7 @@ final class DeepSeekClient {
     }
 }
 
-enum DeepSeekError: Error, LocalizedError {
+enum ChatError: Error, LocalizedError {
     case invalidResponse
     case upstreamError(Int, Any?)
 
