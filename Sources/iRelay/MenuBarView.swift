@@ -41,7 +41,7 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("密钥设置...") { openApiKeyConfig(state: state) }
+        Button("设置密钥") { openApiKeyConfig(state: state) }
         Button("打开日志") { Log.open() }
 
         Divider()
