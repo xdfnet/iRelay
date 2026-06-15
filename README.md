@@ -5,7 +5,7 @@
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> 纯原生 macOS 菜单栏 App — Codex ↔ 任意 LLM 本机中转服务。
+> 纯原生 macOS 菜单栏 App — Codex ↔ DeepSeek 本机中转服务。
 >
 > 纯 Swift 实现，**零外部依赖**。服务随 App 启停，无需手动管理。
 
@@ -13,13 +13,13 @@
 
 | 功能 | 说明 |
 |------|------|
-| 多提供商 | 支持任意 OpenAI Chat API 兼容提供商（DeepSeek、OpenAI、vLLM、Together、Groq、Ollama 等） |
-| 模型切换 | 从上游 API 实时获取模型列表，选中即写入 Codex 配置 |
-| 思考模式 | 按提供商能力开关推理模式 |
-| API Key | 窗口配置，支持每个提供商独立 Key |
-| 端口配置 | 菜单栏可配，无需硬编码 |
-| 模型元数据 | 自动为 Codex 提供完整模型信息（context_window、shell_type 等），消除 fallback 警告 |
-| Codex App 适配 | 自动修补 Codex 桌面 App 的模型白名单过滤，让非 OpenAI 模型显示在模型菜单中 |
+| 模型切换 | 从 DeepSeek API 实时获取模型列表，选中即写入 Codex 配置 |
+| 思考模式 | 一键开关 DeepSeek 推理模式 |
+| API Key | 窗口配置 DeepSeek API Key |
+| 端口固定 | 固定 `8787`，即开即用 |
+| 模型元数据 | 自动为 Codex 提供完整模型信息（context_window、base_instructions 等），消除 fallback 警告 |
+| Codex App 适配 | 自动修补 Codex 桌面 App 的模型白名单过滤，让 DeepSeek 模型显示在模型菜单中 |
+| Chat 透传 | 额外提供 `/v1/chat/completions` 直通接口，流式/非流式均支持 |
 
 ## 要求
 
@@ -57,52 +57,49 @@ open iRelay.app               # 启动
 
 ## 使用
 
-1. 启动 iRelay，点击菜单栏图标 → **配置** → 输入 DeepSeek API Key
+1. 启动 iRelay，点击菜单栏图标 → **配置 → API 密钥** → 输入 DeepSeek API Key
 2. API Key 生效后自动拉取模型列表
 3. 在菜单栏选择模型 → 自动写入 Codex 配置并启用中转
 4. 可在菜单栏切换模型、开关思考模式、关闭 iRelay 模型提供
 
 首次使用后重启 Codex，它会自动从 iRelay 获取模型列表。
 
+完整 API 参考见 [Doc/API.md](Doc/API.md)。
+
 ## 架构
 
 ```
 MenuBarExtra (SwiftUI)
-  ├─ 提供商 / 模型 / 模式 / 配置 / 退出
-  ├─ ProviderStore  — 多提供商配置持久化（UserDefaults）
-  │   └─ v1 迁移（旧版 DeepSeek 配置自动导入）
+  ├─ 模型 / 模式 / 配置 / 退出
+  ├─ RelayState     — 全局状态（apiKey / model / thinking）
+  │   └─ UserDefaults 持久化 + 模型列表缓存
   ├─ CodexConfigManager — ~/.codex/config.toml
-  │   ├─ 写入 model_catalog_json，让 Codex 正确识别各提供商模型
+  │   ├─ 写入 model_catalog_json，让 Codex 正确识别 DeepSeek 模型
   │   └─ CodexAppPatcher — 修补桌面 App 模型白名单过滤
   └─ HTTPServer         — 内嵌 HTTP 服务器
-      └─ RelayHandler   — 路由 + 协议转换（注入 ProviderConfig）
+      └─ RelayHandler   — 路由 + 协议转换
           └─ ChatClient — Chat Completions API 客户端
 ```
 
 - **HTTPServer**: 基于 Network.framework (NWListener)，零外部依赖
-- **RelayHandler**: 路由 `/health` `/v1/models` `/v1/responses`，协议转换
+- **RelayHandler**: 路由 `/health` `/v1/models` `/v1/responses` `/v1/chat/completions`，协议转换
 - **ChatClient**: URLSession + async/await，支持流式 SSE
-- **ProviderStore**: 多提供商管理，UserDefaults 持久化，v1 自动迁移
 - **CodexConfigManager**: 配 Key/切模型时写入 `model_provider = "iRelay"`、当前模型、`model_catalog_json`；关模型时清理
 
 ## 目录结构
 
 ```
 Sources/iRelay/
-├── iRelayApp.swift              # @main 入口，MenuBarExtra + 配置窗口
-├── MenuBarView.swift            # 菜单栏下拉 UI
+├── iRelayApp.swift              # @main 入口，MenuBarExtra + Key 配置窗口
+├── MenuBarView.swift            # 菜单栏下拉 UI（模型/模式/配置/退出）
 ├── Models/
-│   ├── ProviderConfig.swift     # 提供商配置 + 预设工厂
-│   ├── RelayConfig.swift        # ModelInfo 数据模型
 │   └── RelayState.swift         # @Observable 全局状态
 ├── Services/
-│   ├── ProviderStore.swift      # 多提供商持久化存储
 │   ├── CodexConfigManager.swift # ~/.codex/config.toml 和模型 catalog 管理
-│   ├── CodexAppPatcher.swift    # Codex 桌面 App 模型菜单补丁
-│   └── Logger.swift             # 异步文件日志
+│   └── CodexAppPatcher.swift    # Codex 桌面 App 模型菜单补丁
 └── Core/
     ├── HTTPServer.swift         # 内嵌 HTTP 服务器 (NWListener)
-    ├── RelayHandler.swift       # 路由分发 + 协议转换
+    ├── RelayHandler.swift       # 路由分发 + 协议转换 + Chat 透传
     └── ChatClient.swift         # Chat Completions API 客户端
 ```
 

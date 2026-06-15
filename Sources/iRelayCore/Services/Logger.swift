@@ -93,7 +93,9 @@ public enum Log {
                 case "user", "assistant":
                     let text = contentText(dict["content"])
                     if text.isEmpty { return label }
-                    return "\(label):\(text)"
+                    let len = text.count
+                    let preview = text.prefix(80).replacingOccurrences(of: "\n", with: " ")
+                    return "\(label)(\(len) chars): \(preview)"
                 case "developer", "system":
                     let text = contentText(dict["content"])
                     let len = text.count
