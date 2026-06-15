@@ -3,21 +3,21 @@ import Network
 
 // MARK: - HTTP Types
 
-struct HTTPRequest {
-    let method: String
-    let path: String
-    let headers: [String: String]
-    let body: Data
+public struct HTTPRequest {
+    public let method: String
+    public let path: String
+    public let headers: [String: String]
+    public let body: Data
 }
 
-final class ServerConnection {
-    let connection: NWConnection
+public final class ServerConnection {
+    public let connection: NWConnection
 
-    init(_ connection: NWConnection) {
+    public init(_ connection: NWConnection) {
         self.connection = connection
     }
 
-    func sendJSON(status: Int, body: [String: Any]) {
+    public func sendJSON(status: Int, body: [String: Any]) {
         let data = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
         let header = "HTTP/1.1 \(status) \(statusText(status))\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(data.count)\r\nConnection: close\r\n\r\n"
         guard var headerData = header.data(using: .utf8) else {
@@ -31,23 +31,23 @@ final class ServerConnection {
     }
 
     /// SSE 流式响应: 先发 headers，然后通过 sendSSE 写入事件
-    func startSSE() {
+    public func startSSE() {
         let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n"
         connection.send(content: header.data(using: .utf8)!, completion: .contentProcessed({ _ in }))
     }
 
-    func sendSSE(event: String, data: String) {
+    public func sendSSE(event: String, data: String) {
         let payload = "event: \(event)\ndata: \(data)\n\n"
         connection.send(content: payload.data(using: .utf8)!, completion: .contentProcessed({ _ in }))
     }
 
-    func sendSSEJSON(event: String, json: [String: Any]) {
+    public func sendSSEJSON(event: String, json: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: json) else { return }
         let jsonStr = String(data: data, encoding: .utf8) ?? "{}"
         sendSSE(event: event, data: jsonStr)
     }
 
-    func sendSSEJSONAndClose(event: String, json: [String: Any]) {
+    public func sendSSEJSONAndClose(event: String, json: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: json),
               let jsonStr = String(data: data, encoding: .utf8),
               let payload = "event: \(event)\ndata: \(jsonStr)\n\n".data(using: .utf8)
@@ -60,7 +60,7 @@ final class ServerConnection {
         }))
     }
 
-    func close() {
+    public func close() {
         connection.cancel()
     }
 
@@ -80,17 +80,19 @@ final class ServerConnection {
 
 // MARK: - HTTPServer
 
-final class HTTPServer {
+public final class HTTPServer {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "com.xdf.irelay.http", qos: .default)
     private var handlers: [(String, String, (HTTPRequest, ServerConnection) -> Void)] = []
     private let maxRequestBytes = 20 * 1024 * 1024
 
-    func on(_ method: String, _ path: String, handler: @escaping (HTTPRequest, ServerConnection) -> Void) {
+    public init() {}
+
+    public func on(_ method: String, _ path: String, handler: @escaping (HTTPRequest, ServerConnection) -> Void) {
         handlers.append((method.uppercased(), path, handler))
     }
 
-    func start(port: UInt16) throws {
+    public func start(port: UInt16) throws {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
@@ -104,7 +106,7 @@ final class HTTPServer {
         listener?.start(queue: queue)
     }
 
-    func stop() {
+    public func stop() {
         listener?.cancel()
         listener = nil
     }

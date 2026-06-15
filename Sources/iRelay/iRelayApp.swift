@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import iRelayCore
 
 @main
 struct iRelayApp: App {
@@ -269,7 +270,7 @@ private final class ProviderManagerWindow: NSWindowController {
             onUpdate: { updated in
                 // 简单替换：保留 id 不变，更新其他字段
                 for cfg in updated {
-                    if let idx = state.providerStore.providers.firstIndex(where: { $0.id == cfg.id }) {
+                    if state.providerStore.providers.contains(where: { $0.id == cfg.id }) {
                         state.providerStore.updateProvider(cfg)
                     } else {
                         state.providerStore.addProvider(cfg)

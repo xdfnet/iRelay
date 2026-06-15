@@ -1,35 +1,49 @@
 import Foundation
 
 /// 推理模式
-enum ThinkingMode: String, Codable {
+public enum ThinkingMode: String, Codable {
     case none            // 不支持推理
     case deepseekStyle   // payload["thinking"] = ["type": "enabled"/"disabled"]
 }
 
 /// 提供商配置
-struct ProviderConfig: Codable, Equatable, Identifiable {
-    var id: String
-    var name: String
-    var baseURL: String
-    var apiKey: String
-    var defaultModel: String
-    var models: [ModelInfo]
+public struct ProviderConfig: Codable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var baseURL: String
+    public var apiKey: String
+    public var defaultModel: String
+    public var models: [ModelInfo]
 
     // -- 功能标志 --
-    var thinkingMode: ThinkingMode
+    public var thinkingMode: ThinkingMode
     /// SSE delta 中推理文本的字段名（如 "reasoning_content"）
-    var reasoningField: String
-    var supportsToolChoice: Bool
+    public var reasoningField: String
+    public var supportsToolChoice: Bool
 
     // -- 模型目录 --
-    var baseInstructions: String
-    var contextWindow: Int
+    public var baseInstructions: String
+    public var contextWindow: Int
 
-    var supportsThinking: Bool { thinkingMode != .none }
+    public var supportsThinking: Bool { thinkingMode != .none }
+
+    public init(id: String, name: String, baseURL: String, apiKey: String, defaultModel: String, models: [ModelInfo], thinkingMode: ThinkingMode, reasoningField: String, supportsToolChoice: Bool, baseInstructions: String, contextWindow: Int) {
+        self.id = id
+        self.name = name
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.defaultModel = defaultModel
+        self.models = models
+        self.thinkingMode = thinkingMode
+        self.reasoningField = reasoningField
+        self.supportsToolChoice = supportsToolChoice
+        self.baseInstructions = baseInstructions
+        self.contextWindow = contextWindow
+    }
 
     // MARK: - 预设
 
-    static let deepSeek = ProviderConfig(
+    public static let deepSeek = ProviderConfig(
         id: "deepseek",
         name: "DeepSeek",
         baseURL: "https://api.deepseek.com",
@@ -46,7 +60,7 @@ struct ProviderConfig: Codable, Equatable, Identifiable {
         contextWindow: 1_000_000
     )
 
-    static let openAI = ProviderConfig(
+    public static let openAI = ProviderConfig(
         id: "openai",
         name: "OpenAI",
         baseURL: "https://api.openai.com",
@@ -60,7 +74,7 @@ struct ProviderConfig: Codable, Equatable, Identifiable {
         contextWindow: 128_000
     )
 
-    static func custom(baseURL: String) -> ProviderConfig {
+    public static func custom(baseURL: String) -> ProviderConfig {
         ProviderConfig(
             id: "custom-" + UUID().uuidString.prefix(8).lowercased(),
             name: "自定义",

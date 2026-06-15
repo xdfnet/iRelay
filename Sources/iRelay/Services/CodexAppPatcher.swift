@@ -1,4 +1,5 @@
 import Foundation
+import iRelayCore
 
 /// Patches the Codex desktop frontend model picker so custom non-OpenAI models
 /// are not filtered out by the remote GPT model allowlist.

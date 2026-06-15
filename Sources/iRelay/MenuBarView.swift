@@ -1,4 +1,5 @@
 import SwiftUI
+import iRelayCore
 
 struct MenuBarView: View {
     @ObservedObject var state: RelayState

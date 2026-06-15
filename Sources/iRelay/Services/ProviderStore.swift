@@ -1,4 +1,5 @@
 import Foundation
+import iRelayCore
 
 /// 多提供商配置存储，持久化到 UserDefaults
 @MainActor

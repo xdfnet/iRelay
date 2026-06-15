@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import iRelayCore
 
 enum RelayStatus: Equatable {
     case stopped

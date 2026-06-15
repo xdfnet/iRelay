@@ -2,20 +2,20 @@ import Foundation
 
 // MARK: - 类型别名
 
-typealias JSON = [String: Any]
+public typealias JSON = [String: Any]
 
 // MARK: - RelayHandler
 
-final class RelayHandler {
-    let client: ChatClient
-    var provider: ProviderConfig
+public final class RelayHandler {
+    public let client: ChatClient
+    public var provider: ProviderConfig
 
-    init(client: ChatClient, provider: ProviderConfig) {
+    public init(client: ChatClient, provider: ProviderConfig) {
         self.client = client
         self.provider = provider
     }
 
-    func register(on server: HTTPServer) {
+    public func register(on server: HTTPServer) {
         server.on("GET", "/health") { _, conn in
             conn.sendJSON(status: 200, body: ["ok": true])
         }
@@ -540,7 +540,7 @@ final class RelayHandler {
     // MARK: - 输入解析
 
     /// 解析 instructions + input 为 chat messages
-    private static func parseInput(instructions: String, input: Any?) -> [JSON]? {
+    static func parseInput(instructions: String, input: Any?) -> [JSON]? {
         var messages: [JSON] = []
 
         if !instructions.isEmpty {
@@ -601,7 +601,7 @@ final class RelayHandler {
         return messages
     }
 
-    private static func collectFunctionCalls(_ items: [JSON], start: Int) -> (calls: [JSON], consumed: Int) {
+    static func collectFunctionCalls(_ items: [JSON], start: Int) -> (calls: [JSON], consumed: Int) {
         var calls: [JSON] = []
         var i = start
         while i < items.count {
@@ -623,7 +623,7 @@ final class RelayHandler {
         return (calls, i - start)
     }
 
-    private static func responseItemToMessage(_ item: JSON) -> (JSON, Bool)? {
+    static func responseItemToMessage(_ item: JSON) -> (JSON, Bool)? {
         let type = item["type"] as? String ?? ""
         let role = normalizeRole(item["role"] as? String ?? "")
 
@@ -656,7 +656,7 @@ final class RelayHandler {
         }
     }
 
-    private static func contentToText(_ content: Any?) -> String? {
+    static func contentToText(_ content: Any?) -> String? {
         guard let content else { return nil }
         if let text = content as? String { return text }
         if let items = content as? [Any] {
@@ -675,7 +675,7 @@ final class RelayHandler {
         return nil
     }
 
-    private static func ensureToolAfterAssistant(_ messages: [JSON]) -> [JSON] {
+    static func ensureToolAfterAssistant(_ messages: [JSON]) -> [JSON] {
         var result: [JSON] = []
         var i = 0
         while i < messages.count {
@@ -711,7 +711,7 @@ final class RelayHandler {
 
     // MARK: - Helpers
 
-    private static func convertTools(_ tools: [JSON]) -> [JSON] {
+    static func convertTools(_ tools: [JSON]) -> [JSON] {
         tools.compactMap { tool in
             guard tool["type"] as? String == "function" else { return nil }
             let params = tool["parameters"] ?? ["type": "object", "properties": [:]] as JSON

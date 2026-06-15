@@ -13,7 +13,7 @@ import AppKit
 ///   - reopenable file writer (survives log rotation by external tools)
 ///   - stderr tee only when terminal is interactive
 ///   - async write on utility serial queue
-enum Log {
+public enum Log {
 
     // MARK: - Paths
 
@@ -54,29 +54,29 @@ enum Log {
     /// - Parameters:
     ///   - event: kebab-case event name (e.g. "service_starting", "codex_request")
     ///   - pairs: alternating key-value pairs for structured context
-    static func info(_ event: String, _ pairs: Any...) {
+    public static func info(_ event: String, _ pairs: Any...) {
         write(level: "INFO", event: event, pairs: pairs)
     }
 
     /// Log an ERROR-level structured event.
-    static func error(_ event: String, _ pairs: Any...) {
+    public static func error(_ event: String, _ pairs: Any...) {
         write(level: "ERROR", event: event, pairs: pairs)
     }
 
     /// Compute milliseconds elapsed since `start`.
-    static func msSince(_ start: Date) -> Int64 {
+    public static func msSince(_ start: Date) -> Int64 {
         Int64(-start.timeIntervalSinceNow * 1000)
     }
 
     /// Open log file in default editor.
-    static func open() {
+    public static func open() {
         guard let url = URL(string: "file://\(logPath.path)") else { return }
         NSWorkspace.shared.open(url)
     }
 
     /// 提取输入的文本表示供日志展示。
     /// 只展开 user/assistant 消息，developer/system 和 tool 调用只显示摘要。
-    static func summaryInput(_ input: Any?) -> String {
+    public static func summaryInput(_ input: Any?) -> String {
         guard let input else { return "" }
         if let s = input as? String {
             return s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -131,7 +131,7 @@ enum Log {
     }
 
     /// Visual separator for request boundaries (matching iRelay's `END` line).
-    static func end() {
+    public static func end() {
         info("-------------------------END------------------------------")
     }
 

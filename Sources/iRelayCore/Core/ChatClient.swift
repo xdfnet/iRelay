@@ -1,7 +1,7 @@
 import Foundation
 
 /// OpenAI Chat Completions API 客户端
-final class ChatClient {
+public final class ChatClient {
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 120
@@ -11,7 +11,7 @@ final class ChatClient {
 
     private let apiKeyLock = NSLock()
     private var apiKeyStorage: String
-    var apiKey: String {
+    public var apiKey: String {
         get {
             apiKeyLock.lock()
             defer { apiKeyLock.unlock() }
@@ -23,10 +23,10 @@ final class ChatClient {
             apiKeyLock.unlock()
         }
     }
-    let baseURL: URL
-    let chatEndpoint: String
+    public let baseURL: URL
+    public let chatEndpoint: String
 
-    init(apiKey: String, baseURL: URL, chatEndpoint: String = "/chat/completions") {
+    public init(apiKey: String, baseURL: URL, chatEndpoint: String = "/chat/completions") {
         self.apiKeyStorage = apiKey
         self.baseURL = baseURL
         self.chatEndpoint = chatEndpoint
@@ -34,7 +34,7 @@ final class ChatClient {
 
     // MARK: - 非流式请求
 
-    func chat(payload: [String: Any]) async throws -> (data: [String: Any], status: Int) {
+    public func chat(payload: [String: Any]) async throws -> (data: [String: Any], status: Int) {
         var req = try makeRequest(payload)
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
@@ -49,7 +49,7 @@ final class ChatClient {
 
     // MARK: - 流式请求
 
-    func chatStream(payload: [String: Any]) -> AsyncThrowingStream<[String: Any], Error> {
+    public func chatStream(payload: [String: Any]) -> AsyncThrowingStream<[String: Any], Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -96,11 +96,11 @@ final class ChatClient {
     }
 }
 
-enum ChatError: Error, LocalizedError {
+public enum ChatError: Error, LocalizedError {
     case invalidResponse
     case upstreamError(Int, Any?)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "upstream returned invalid JSON"

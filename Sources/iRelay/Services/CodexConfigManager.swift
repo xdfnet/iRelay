@@ -1,4 +1,5 @@
 import Foundation
+import iRelayCore
 
 /// 管理 ~/.codex/config.toml，控制 Codex 使用 iRelay 本地中转
 final class CodexConfigManager {
