@@ -5,29 +5,13 @@ struct MenuBarView: View {
     @ObservedObject var state: RelayState
 
     var body: some View {
-        Menu("模型") {
-            ForEach(state.availableModels) { model in
-                Button {
-                    state.selectModel(model.id)
-                } label: {
-                    HStack {
-                        Text(model.displayName)
-                        if state.codexEnabled, model.id == state.model {
-                            Spacer()
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
+        ForEach(state.availableModels) { model in
             Button {
-                state.disableCodex()
+                state.selectModel(model.id)
             } label: {
                 HStack {
-                    Text("关闭")
-                    if !state.codexEnabled {
+                    Text(model.displayName)
+                    if state.codexEnabled, model.id == state.model {
                         Spacer()
                         Image(systemName: "checkmark")
                     }
@@ -37,37 +21,35 @@ struct MenuBarView: View {
 
         Divider()
 
-        Menu("模式") {
-            Button {
-                state.setThinking(true)
-            } label: {
-                HStack {
-                    Text("开启")
-                    if state.thinkingEnabled {
-                        Spacer()
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-
-            Button {
-                state.setThinking(false)
-            } label: {
-                HStack {
-                    Text("关闭")
-                    if !state.thinkingEnabled {
-                        Spacer()
-                        Image(systemName: "checkmark")
-                    }
+        Button {
+            state.setThinking(!state.thinkingEnabled)
+        } label: {
+            HStack {
+                Text("推理模式")
+                Spacer()
+                if state.thinkingEnabled {
+                    Image(systemName: "checkmark")
                 }
             }
         }
 
         Divider()
 
-        Menu("配置") {
-            Button("密钥设置") { openApiKeyConfig(state: state) }
-            Button("打开日志") { Log.open() }
+        Button("密钥设置...") { openApiKeyConfig(state: state) }
+        Button("打开日志") { Log.open() }
+
+        Divider()
+
+        Button {
+            state.toggleCodex()
+        } label: {
+            HStack {
+                Text(state.codexEnabled ? "关闭 Codex 集成" : "开启 Codex 集成")
+                Spacer()
+                if !state.codexEnabled {
+                    Image(systemName: "checkmark")
+                }
+            }
         }
 
         Divider()

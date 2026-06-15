@@ -49,7 +49,7 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.1.0"
+    static let version = "2.1.1"
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Self.keychainKey) ?? ""
@@ -80,7 +80,9 @@ final class RelayState: ObservableObject {
 
         let c = ChatClient(apiKey: apiKey, baseURL: upstreamURL)
         client = c
-        let h = RelayHandler(client: c, provider: .deepSeek)
+        var p = ProviderConfig.deepSeek
+        p.thinkingMode = thinkingEnabled ? .deepseekStyle : .none
+        let h = RelayHandler(client: c, provider: p)
         handler = h
 
         let httpServer = HTTPServer()
@@ -123,6 +125,15 @@ final class RelayState: ObservableObject {
         codexEnabled = false
         codexConfigManager.disable()
         Log.info("codex_config_disabled")
+    }
+
+    func toggleCodex() {
+        if codexEnabled {
+            disableCodex()
+        } else if !apiKey.isEmpty {
+            codexEnabled = true
+            syncCodexConfig()
+        }
     }
 
     func toggleThinking() { setThinking(!thinkingEnabled) }

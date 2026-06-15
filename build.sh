@@ -30,13 +30,16 @@ cp Resources/Info.plist "$APP_CONTENTS/"
 cp Resources/AppIcon.icns "$APP_RESOURCES/"
 
 echo "==> 签名..."
-codesign --force --sign "-" "$APP_BUNDLE"
+codesign --force --sign "4A287668E97BC130AA6D19F4D64799394CAACBAD" "$APP_BUNDLE"
 
 if [ "$CONFIG" = "release" ]; then
     echo "==> 打包 zip..."
-    zip -r "${PROJECT}.zip" "${PROJECT}.app"
+    zip -r "${PROJECT}.zip" "$PROJECT.app"
     echo "   ${PROJECT}.zip"
 fi
 
-echo ""
-echo "构建完成: $APP_BUNDLE"
+echo "==> 安装..."
+rm -rf /Applications/iRelay.app
+cp -r "$APP_BUNDLE" /Applications/
+xattr -dr com.apple.quarantine /Applications/iRelay.app
+echo "   已安装到 /Applications/iRelay.app"
