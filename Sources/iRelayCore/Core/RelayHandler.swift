@@ -121,7 +121,6 @@ public final class RelayHandler {
             return
         }
         let stream = body["stream"] as? Bool ?? false
-        let start = Date()
 
         if stream {
             conn.startSSE()
