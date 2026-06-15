@@ -24,17 +24,12 @@ final class RelayState: ObservableObject {
     @Published var codexEnabled: Bool {
         didSet { UserDefaults.standard.set(codexEnabled, forKey: Self.codexKey) }
     }
-    @Published var port: UInt16 {
-        didSet { UserDefaults.standard.set(port, forKey: Self.portKey) }
-    }
     var upstream: String = "https://api.deepseek.com"
 
     private static let keychainKey = "irelay_apiKey"
     static let modelKey = "irelay_model"
     private static let thinkingKey = "irelay_thinking"
     private static let codexKey = "irelay_codexEnabled"
-    private static let portKey = "irelay_port"
-
     private static func saveModels(_ models: [ModelInfo]) {
         guard let data = try? JSONEncoder().encode(models) else { return }
         UserDefaults.standard.set(data, forKey: "irelay_models")
@@ -61,8 +56,7 @@ final class RelayState: ObservableObject {
         model = UserDefaults.standard.string(forKey: Self.modelKey) ?? "deepseek-v4-pro"
         thinkingEnabled = UserDefaults.standard.object(forKey: Self.thinkingKey) as? Bool ?? true
         codexEnabled = UserDefaults.standard.object(forKey: Self.codexKey) as? Bool ?? true
-        port = UInt16(UserDefaults.standard.integer(forKey: Self.portKey))
-        if port == 0 { port = 8787 }
+
         turnOn(model: model)
     }
 
@@ -76,7 +70,7 @@ final class RelayState: ObservableObject {
         self.model = model
         guard status == .stopped else { return }
         status = .starting
-        Log.info("service_starting", "model", model, "port", port)
+        Log.info("service_starting", "model", model, "port", 8787)
 
         guard let upstreamURL = URL(string: upstream) else {
             Log.error("config_invalid", "key", "upstream", "value", upstream)
@@ -93,10 +87,10 @@ final class RelayState: ObservableObject {
         h.register(on: httpServer)
 
         do {
-            try httpServer.start(port: port)
+            try httpServer.start(port: 8787)
             server = httpServer
             status = .running
-            Log.info("server_started", "port", port)
+            Log.info("server_started", "port", 8787)
         } catch {
             server = nil
             client = nil
@@ -190,7 +184,7 @@ final class RelayState: ObservableObject {
             codexEnabled = false
             return
         }
-        if codexConfigManager.enable(model: model, port: port) {
+        if codexConfigManager.enable(model: model, port: 8787) {
             codexEnableSkippedForMissingKey = false
             Log.info("codex_config_enabled", "model", model)
         }
