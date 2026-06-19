@@ -30,7 +30,14 @@ cp Resources/Info.plist "$APP_CONTENTS/"
 cp Resources/AppIcon.icns "$APP_RESOURCES/"
 
 echo "==> 签名..."
-codesign --force --sign "4A287668E97BC130AA6D19F4D64799394CAACBAD" "$APP_BUNDLE"
+CERT="4A287668E97BC130AA6D19F4D64799394CAACBAD"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$CERT" && \
+   security find-identity -v -p codesigning 2>/dev/null | grep "$CERT" | grep -qv "REVOKED\|EXPIRED"; then
+    codesign --force --sign "$CERT" "$APP_BUNDLE"
+else
+    echo "   证书不可用，使用 ad-hoc 签名"
+    codesign --force --sign - "$APP_BUNDLE"
+fi
 
 if [ "$CONFIG" = "release" ]; then
     echo "==> 打包 zip..."
