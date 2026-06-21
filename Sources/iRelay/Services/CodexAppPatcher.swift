@@ -25,17 +25,13 @@ final class CodexAppPatcher {
     func ensurePatched() -> Bool {
         defer { startGuard() }
 
-        if applyPatch() {
-            Log.info("codex_app_patch_ok", "status", "patched", "backup", backupPath.path)
-            return true
-        }
+        if applyPatch() { return true }
 
-        // 权限不通 → 阻塞引导，不通别想用
-        showBlockingAlert()
-        return true // 能走到这说明权限通了
+        // 延迟弹窗，等主循环就绪
+        DispatchQueue.main.async { [self] in showBlockingAlert() }
+        return false
     }
 
-    /// 还原补丁
     @discardableResult
     func restoreIfPossible() -> Bool {
         guard let source = restoreBackupPath() else {
@@ -62,12 +58,12 @@ final class CodexAppPatcher {
 
     // MARK: - 打补丁
 
-    /// 读 asar → 备份 → 替换 → 写回，true = 成功
-    /// 写入失败不弹窗，由调用者决定是否引导
     private func applyPatch() -> Bool {
         guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return false }
         guard let data = try? Data(contentsOf: appAsarPath) else { return false }
-        if data.range(of: patched) != nil || data.range(of: manualPatched) != nil { return true }
+        if data.range(of: patched) != nil || data.range(of: manualPatched) != nil {
+            return probeWrite(data)
+        }
         guard let range = data.range(of: original) else { return false }
 
         if FileManager.default.fileExists(atPath: backupPath.path) {
@@ -82,14 +78,29 @@ final class CodexAppPatcher {
             try next.write(to: appAsarPath, options: .atomic)
             return true
         } catch {
-            let e = error as NSError
-            if e.domain == NSPOSIXErrorDomain && (e.code == EPERM || e.code == EACCES) {
-                Log.error("codex_app_patch_permission_denied",
-                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-            } else {
-                Log.error("codex_app_patch_failed", "error", error.localizedDescription)
-            }
+            logWriteError(error)
             return false
+        }
+    }
+
+    /// 原样写回，验证写入权限仍通
+    private func probeWrite(_ data: Data) -> Bool {
+        do {
+            try data.write(to: appAsarPath, options: .atomic)
+            return true
+        } catch {
+            logWriteError(error)
+            return false
+        }
+    }
+
+    private func logWriteError(_ error: Error) {
+        let e = error as NSError
+        if e.domain == NSPOSIXErrorDomain && (e.code == EPERM || e.code == EACCES) {
+            Log.error("codex_app_patch_permission_denied",
+                "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+        } else {
+            Log.error("codex_app_patch_failed", "error", error.localizedDescription)
         }
     }
 
@@ -101,7 +112,6 @@ final class CodexAppPatcher {
         Thread.detachNewThread { [weak self] in self?.guardLoop() }
     }
 
-    /// 每 60 秒 stat asar mtime，变了就重打补丁
     private func guardLoop() {
         var lastMTime: Date?
 
@@ -126,28 +136,24 @@ final class CodexAppPatcher {
 
     // MARK: - 阻塞权限引导
 
-    /// 阻塞主线程循环弹窗，直到用户授权或退出 App
     private func showBlockingAlert() {
-        DispatchQueue.main.sync {
-            while true {
-                let alert = NSAlert()
-                alert.messageText = "需要「App 管理」权限"
-                alert.informativeText = "iRelay 需要修改 Codex 桌面版才能显示 DeepSeek 模型。\n\n请前往：系统设置 → 隐私与安全性 → App 管理 → 开启 iRelay"
-                alert.addButton(withTitle: "打开系统设置")
-                alert.addButton(withTitle: "退出 iRelay")
-                alert.alertStyle = .warning
+        while true {
+            let alert = NSAlert()
+            alert.messageText = "需要「App 管理」权限"
+            alert.informativeText = "iRelay 需要修改 Codex 桌面版才能显示 DeepSeek 模型。\n\n请前往：系统设置 → 隐私与安全性 → App 管理 → 开启 iRelay"
+            alert.addButton(withTitle: "打开系统设置")
+            alert.addButton(withTitle: "退出 iRelay")
+            alert.alertStyle = .warning
 
-                switch alert.runModal() {
-                case .alertFirstButtonReturn:
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
-                        NSWorkspace.shared.open(url)
-                    }
-                    // 回来自动重试，还不行继续弹
-                    if applyPatch() { return }
-
-                default:
-                    NSApp.terminate(nil)
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
+                    NSWorkspace.shared.open(url)
                 }
+                if applyPatch() { return }
+
+            default:
+                NSApp.terminate(nil)
             }
         }
     }

@@ -19,7 +19,7 @@ struct MenuBarView: View {
                     Text(model.displayName)
                     if state.codexEnabled, model.id == state.model {
                         Spacer()
-                        Image(systemName: "checkmark")
+                        Text("✓")
                     }
                 }
             }
