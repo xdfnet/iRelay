@@ -30,13 +30,24 @@ cp Resources/Info.plist "$APP_CONTENTS/"
 cp Resources/AppIcon.icns "$APP_RESOURCES/"
 
 echo "==> 签名..."
-CERT="4A287668E97BC130AA6D19F4D64799394CAACBAD"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$CERT" && \
-   security find-identity -v -p codesigning 2>/dev/null | grep "$CERT" | grep -qv "REVOKED\|EXPIRED"; then
-    codesign --force --sign "$CERT" "$APP_BUNDLE"
+
+# 自动查找第一个有效的签名证书（非 REVOKED / EXPIRED）
+CERT=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -v "REVOKED\|EXPIRED" \
+    | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+
+if [ -n "$CERT" ]; then
+    echo "   使用证书: $CERT"
+    codesign --force --sign "$CERT" \
+        --entitlements Resources/iRelay.entitlements \
+        --options runtime \
+        --timestamp \
+        "$APP_BUNDLE"
 else
-    echo "   证书不可用，使用 ad-hoc 签名"
-    codesign --force --sign - "$APP_BUNDLE"
+    echo "   无有效证书，使用 ad-hoc 签名"
+    codesign --force --sign - \
+        --entitlements Resources/iRelay.entitlements \
+        "$APP_BUNDLE"
 fi
 
 if [ "$CONFIG" = "release" ]; then
