@@ -2,11 +2,7 @@ import Foundation
 import AppKit
 import iRelayCore
 
-/// Patches the Codex desktop frontend model picker so custom non-OpenAI models
-/// are not filtered out by the remote GPT model allowlist.
-///
-/// 启动 guard 后每 60 秒 stat 一次 asar mtime，变了才读内容验补丁。
-/// Codex 升级后 asar 被恢复原样时自动重打，权限不足时弹窗引导。
+/// 管理 Codex 桌面版 app.asar 补丁
 final class CodexAppPatcher {
     private let appAsarPath = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
     private var backupPath: URL {
@@ -17,62 +13,30 @@ final class CodexAppPatcher {
     private let patched = Data("s?!n.hidden     :!n.hidden".utf8)
     private let manualPatched = Data("s?t.has(n.model)||!n.model.startsWith(`gpt-`):!n.hidden".utf8)
 
-    private var guardThreadActive = false
+    private var guardActive = false
     private var alertActive = false
 
     // MARK: - Public
 
+    /// 打补丁（首次），失败弹窗引导，无论成败启动后台守护
     @discardableResult
     func ensurePatched() -> Bool {
         defer { startGuard() }
 
-        guard FileManager.default.fileExists(atPath: appAsarPath.path) else {
-            Log.error("codex_app_patch_failed", "reason", "app_asar_missing", "path", appAsarPath.path)
-            return false
-        }
-
-        do {
-            let data = try Data(contentsOf: appAsarPath)
-            if data.range(of: patched) != nil || data.range(of: manualPatched) != nil {
-                Log.info("codex_app_patch_ok", "status", "already_patched")
-                return true
-            }
-
-            guard let range = data.range(of: original) else {
-                Log.error("codex_app_patch_failed", "reason", "pattern_not_found")
-                return false
-            }
-
-            if FileManager.default.fileExists(atPath: backupPath.path) {
-                try FileManager.default.removeItem(at: backupPath)
-            }
-            try FileManager.default.copyItem(at: appAsarPath, to: backupPath)
-
-            var next = data
-            next.replaceSubrange(range, with: patched)
-            try next.write(to: appAsarPath, options: .atomic)
+        let ok = applyPatch(notify: true)
+        if ok {
             Log.info("codex_app_patch_ok", "status", "patched", "backup", backupPath.path)
-            return true
-        } catch {
-            let nsError = error as NSError
-            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
-                Log.error("codex_app_patch_permission_denied",
-                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-                showPermissionAlert()
-            } else {
-                Log.error("codex_app_patch_failed", "error", error.localizedDescription)
-            }
-            return false
         }
+        return ok
     }
 
+    /// 还原补丁
     @discardableResult
     func restoreIfPossible() -> Bool {
         guard let source = restoreBackupPath() else {
             Log.info("codex_app_restore_skip", "reason", "backup_missing")
             return true
         }
-
         do {
             try FileManager.default.copyItemReplacingExisting(at: source, to: appAsarPath)
             Log.info("codex_app_restore_ok", "backup", source.path)
@@ -83,82 +47,87 @@ final class CodexAppPatcher {
         }
     }
 
-    func stopGuard() { guardThreadActive = false }
+    func stopGuard() { guardActive = false }
 
     func deleteBackup() {
         let path = backupPath.path
         guard FileManager.default.fileExists(atPath: path) else { return }
+        try? FileManager.default.removeItem(at: backupPath)
+    }
+
+    // MARK: - 核心补丁逻辑
+
+    /// 读 asar → 备份 → 替换 → 写回，true = 成功
+    /// notify: 写入失败时是否弹窗引导权限
+    private func applyPatch(notify: Bool) -> Bool {
+        guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return false }
+
+        guard let data = try? Data(contentsOf: appAsarPath) else { return false }
+        // 已打就不重复
+        if data.range(of: patched) != nil || data.range(of: manualPatched) != nil { return true }
+        // 找不到原始模式也没法打
+        guard let range = data.range(of: original) else { return false }
+
+        // 备份
+        if FileManager.default.fileExists(atPath: backupPath.path) {
+            try? FileManager.default.removeItem(at: backupPath)
+        }
+        try? FileManager.default.copyItem(at: appAsarPath, to: backupPath)
+
+        // 替换
+        var next = data
+        next.replaceSubrange(range, with: patched)
+
         do {
-            try FileManager.default.removeItem(at: backupPath)
-            Log.info("codex_app_backup_deleted", "path", path)
+            try next.write(to: appAsarPath, options: .atomic)
+            return true
         } catch {
-            Log.error("codex_app_backup_delete_failed", "error", error.localizedDescription)
+            let e = error as NSError
+            if e.domain == NSPOSIXErrorDomain && (e.code == EPERM || e.code == EACCES) {
+                Log.error("codex_app_patch_permission_denied",
+                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+                if notify { showPermissionAlert() }
+            } else {
+                Log.error("codex_app_patch_failed", "error", error.localizedDescription)
+            }
+            return false
         }
     }
 
-    // MARK: - Guard
+    // MARK: - 后台守护
 
     private func startGuard() {
-        guard !guardThreadActive else { return }
-        guardThreadActive = true
-        let t = Thread { [weak self] in self?.guardLoop() }
-        t.name = "com.xdf.irelay.codex-patcher"
-        t.start()
+        guard !guardActive else { return }
+        guardActive = true
+        Thread.detachNewThread { [weak self] in self?.guardLoop() }
     }
 
-    /// 每 60 秒 stat 一次 asar mtime，变了才读内容验补丁
+    /// 每 60 秒 stat asar mtime，变了才静默重试补丁
     private func guardLoop() {
-        Log.info("codex_app_patch_guard_started")
         var lastMTime: Date?
 
-        while guardThreadActive {
+        while guardActive {
             Thread.sleep(forTimeInterval: 60)
-            guard guardThreadActive else { break }
+            guard guardActive else { break }
 
-            let mtime = fileModificationDate()
+            let mtime = asarModificationDate()
             if mtime == lastMTime { continue }
             lastMTime = mtime
 
-            ensurePatchIntact()
-        }
-
-        Log.info("codex_app_patch_guard_stopped")
-    }
-
-    /// 轻量 stat，不读文件内容
-    private func fileModificationDate() -> Date? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: appAsarPath.path) else { return nil }
-        return attrs[.modificationDate] as? Date
-    }
-
-    /// 读 asar 检查补丁，丢了就重打（写入失败会弹权限引导）
-    private func ensurePatchIntact() {
-        guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return }
-
-        guard let data = try? Data(contentsOf: appAsarPath) else { return }
-        if data.range(of: patched) != nil || data.range(of: manualPatched) != nil { return }
-        guard let range = data.range(of: original) else { return }
-
-        do {
-            var next = data
-            next.replaceSubrange(range, with: patched)
-            try next.write(to: appAsarPath, options: .atomic)
-            Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
-        } catch {
-            let nsError = error as NSError
-            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
-                Log.error("codex_app_patch_permission_denied",
-                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-                showPermissionAlert()
-            } else {
-                Log.info("codex_app_patch_guard_retry", "error", error.localizedDescription)
+            // 静默重打（不弹窗），成了 Log，败了下轮再试
+            if applyPatch(notify: false) {
+                Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
             }
         }
     }
 
-    // MARK: - Alert
+    private func asarModificationDate() -> Date? {
+        guard let a = try? FileManager.default.attributesOfItem(atPath: appAsarPath.path) else { return nil }
+        return a[.modificationDate] as? Date
+    }
 
-    /// 弹窗提示用户前往系统设置授予 App 管理权限（防重复）
+    // MARK: - 权限弹窗
+
     private func showPermissionAlert() {
         guard !alertActive else { return }
         alertActive = true
@@ -169,10 +138,9 @@ final class CodexAppPatcher {
             alert.addButton(withTitle: "打开系统设置")
             alert.addButton(withTitle: "稍后")
             alert.alertStyle = .warning
-
-            let response = alert.runModal()
+            let r = alert.runModal()
             alertActive = false
-            if response == .alertFirstButtonReturn {
+            if r == .alertFirstButtonReturn {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
                     NSWorkspace.shared.open(url)
                 }
@@ -180,25 +148,21 @@ final class CodexAppPatcher {
         }
     }
 
-    // MARK: - Backup
+    // MARK: - 备份查找
 
     private func restoreBackupPath() -> URL? {
-        if FileManager.default.fileExists(atPath: backupPath.path) {
-            return backupPath
-        }
+        if FileManager.default.fileExists(atPath: backupPath.path) { return backupPath }
         let dir = appAsarPath.deletingLastPathComponent()
-        let backups = (try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        )) ?? []
-        return backups
+        let backups = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
             .filter { $0.lastPathComponent.hasPrefix("app.asar.bak.irelay.") }
-            .sorted { lhs, rhs in
-                let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return left > right
-            }
-            .first
+            .sorted { ($0.contentModificationDate ?? .distantPast) > ($1.contentModificationDate ?? .distantPast) }
+        return backups.first
+    }
+}
+
+private extension URL {
+    var contentModificationDate: Date? {
+        try? resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 }
 
