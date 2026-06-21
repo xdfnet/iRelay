@@ -22,13 +22,13 @@ final class CodexConfigManager {
 
     @discardableResult
     func enable(model: String, port: UInt16) -> Bool {
-        // 1. 先打补丁（权限前置检查），失败则不写配置
+        // 1. 先打补丁（权限前置检查）
         guard patchAppAsar() else {
             Log.error("codex_config_enable_failed", "reason", "asar_patch_failed")
             return false
         }
 
-        // 2. 后写配置
+        // 2. 后写配置，失败则回滚 asar
         let raw = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
         let next = configureCodexTOML(raw, model: model, port: port)
         do {
@@ -37,27 +37,37 @@ final class CodexConfigManager {
             try next.write(to: configPath, atomically: true, encoding: .utf8)
             return true
         } catch {
-            Log.error("codex_config_write_failed", "action", "enable", "error", error.localizedDescription)
+            Log.error("codex_config_enable_failed", "reason", "config_write_failed",
+                "error", error.localizedDescription, "rollback", "restore_asar")
+            appPatcher.restoreIfPossible()
+            appPatcher.deleteBackup()
             return false
         }
     }
 
     @discardableResult
     func disable() -> Bool {
-        // 1. 先还原补丁（权限前置检查），失败则不写配置
+        // 1. 先还原补丁（权限前置检查）
         guard restoreAppAsar() else {
             Log.error("codex_config_disable_failed", "reason", "asar_restore_failed")
             return false
         }
         appPatcher.stopGuard()
 
-        // 2. 后清配置
-        if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
-            let next = disableCodexTOML(raw)
-            try? next.write(to: configPath, atomically: true, encoding: .utf8)
+        // 2. 后清配置，失败则回滚补丁
+        do {
+            if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
+                let next = disableCodexTOML(raw)
+                try next.write(to: configPath, atomically: true, encoding: .utf8)
+            }
+            try FileManager.default.removeItem(at: modelCatalogPath)
+            return true
+        } catch {
+            Log.error("codex_config_disable_failed", "reason", "config_clear_failed",
+                "error", error.localizedDescription, "rollback", "re-patch_asar")
+            appPatcher.ensurePatched()
+            return false
         }
-        try? FileManager.default.removeItem(at: modelCatalogPath)
-        return true
     }
 
     @discardableResult
