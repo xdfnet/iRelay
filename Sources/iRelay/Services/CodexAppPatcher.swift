@@ -64,10 +64,9 @@ final class CodexAppPatcher {
         }
     }
 
-    /// 恢复原始 asar 并停止 guard
+    /// 恢复原始 asar（不操作 guard，由调用方处理）
     @discardableResult
     func restoreIfPossible() -> Bool {
-        stopGuard()
         guard let source = restoreBackupPath() else {
             Log.info("codex_app_restore_skip", "reason", "backup_missing")
             return true
@@ -82,6 +81,8 @@ final class CodexAppPatcher {
             return false
         }
     }
+
+    func stopGuard() { guardThreadActive = false }
 
     func deleteBackup() {
         let path = backupPath.path
@@ -103,10 +104,6 @@ final class CodexAppPatcher {
         let t = Thread { [weak self] in self?.guardLoop() }
         t.name = "com.xdf.irelay.codex-patcher"
         t.start()
-    }
-
-    private func stopGuard() {
-        guardThreadActive = false
     }
 
     private func guardLoop() {
