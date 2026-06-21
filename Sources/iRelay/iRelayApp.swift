@@ -31,11 +31,18 @@ func openApiKeyConfig(state: RelayState) {
 
 // MARK: - Forms
 
-private struct ApiKeyFormView: View {
+struct ApiKeyFormView: View {
     @State private var keyInput = ""
     let currentKey: String
     let onSave: (String) -> Void
     let onDismiss: () -> Void
+
+    init(currentKey: String, onSave: @escaping (String) -> Void, onDismiss: @escaping () -> Void) {
+        self._keyInput = State(initialValue: currentKey)
+        self.currentKey = currentKey
+        self.onSave = onSave
+        self.onDismiss = onDismiss
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -64,7 +71,7 @@ private struct ApiKeyFormView: View {
 // MARK: - 窗口控制器
 
 @MainActor
-private final class ApiKeyConfigWindow: NSWindowController {
+final class ApiKeyConfigWindow: NSWindowController {
     static let shared = ApiKeyConfigWindow()
 
     private init() {

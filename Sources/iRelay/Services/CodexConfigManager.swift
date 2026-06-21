@@ -150,10 +150,11 @@ final class CodexConfigManager {
             "display_name": id,
             "description": desc,
             "supported_reasoning_levels": [
-                ["effort": "none", "description": ""],
-                ["effort": "low", "description": ""],
-                ["effort": "medium", "description": ""],
-                ["effort": "high", "description": ""]
+                ["effort": "none", "description": "不推理"],
+                ["effort": "low", "description": "快速响应"],
+                ["effort": "medium", "description": "平衡速度与深度"],
+                ["effort": "high", "description": "深度推理"],
+                ["effort": "xhigh", "description": "极深推理"]
             ],
             "default_reasoning_level": "none",
             "shell_type": "shell_command",
@@ -161,15 +162,18 @@ final class CodexConfigManager {
             "supported_in_api": true,
             "priority": priority,
             "base_instructions": "You are a helpful AI assistant powered by DeepSeek.",
-            "supports_reasoning_summaries": false,
-            "support_verbosity": false,
+            "supports_reasoning_summaries": true,
+            "default_reasoning_summary": "concise",
+            "support_verbosity": true,
             "default_verbosity": "low",
             "apply_patch_tool_type": "freeform",
             "supports_parallel_tool_calls": true,
             "context_window": 1_000_000,
             "max_context_window": 1_000_000,
             "effective_context_window_percent": 95,
+            "auto_compact_token_limit": 950_000,
             "input_modalities": ["text"],
+            "web_search_tool_type": "text",
             "experimental_supported_tools": [],
             "truncation_policy": ["mode": "tokens", "limit": 1_000_000]
         ]
