@@ -5,26 +5,39 @@ import iRelayCore
 /// 管理 Codex 桌面版 app.asar 补丁
 final class CodexAppPatcher {
     private let asar = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
+    private let backup = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar.bak")
     private let original = Data("s?t.has(n.model):!n.hidden".utf8)
     private let patched  = Data("s?!n.hidden     :!n.hidden".utf8)
 
-    /// 打补丁，失败弹窗引导
+    /// 备份 → 打补丁，失败弹窗引导
     @discardableResult
     func ensurePatched() -> Bool {
-        if applyPatch() { return true }
-        DispatchQueue.main.async { [self] in showAlert() }
-        return false
+        do {
+            // 1. 删除旧备份
+            if FileManager.default.fileExists(atPath: backup.path) {
+                try FileManager.default.removeItem(at: backup)
+            }
+            // 2. 备份
+            try FileManager.default.copyItem(at: asar, to: backup)
+            // 3. 打补丁
+            return applyPatch()
+        } catch {
+            Log.error("codex_app_patch_failed", "error", error.localizedDescription)
+            DispatchQueue.main.async { [self] in showAlert() }
+            return false
+        }
     }
 
-    /// 还原补丁（反向替换）
+    /// 从备份还原 asar（关闭集成用）
     @discardableResult
-    func restore() -> Bool {
-        guard let data = try? Data(contentsOf: asar) else { return false }
-        guard let r = data.range(of: patched) else { return true } // 没打过就不用还原
-        var d = data
-        d.replaceSubrange(r, with: original)
+    func restoreFromBackup() -> Bool {
+        guard FileManager.default.fileExists(atPath: backup.path) else { return true }
         do {
-            try d.write(to: asar, options: .atomic)
+            if FileManager.default.fileExists(atPath: asar.path) {
+                try FileManager.default.removeItem(at: asar)
+            }
+            try FileManager.default.copyItem(at: backup, to: asar)
+            try FileManager.default.removeItem(at: backup)
             return true
         } catch {
             Log.error("codex_app_restore_failed", "error", error.localizedDescription)
@@ -32,9 +45,12 @@ final class CodexAppPatcher {
         }
     }
 
-    /// 读/写 asar（事务回滚用）
-    func readAsar() -> Data? { try? Data(contentsOf: asar) }
-    func writeAsar(_ data: Data) { try? data.write(to: asar, options: .atomic) }
+    /// 删备份（enable 回滚用）
+    func deleteBackup() {
+        if FileManager.default.fileExists(atPath: backup.path) {
+            try? FileManager.default.removeItem(at: backup)
+        }
+    }
 
     private func applyPatch() -> Bool {
         guard let data = try? Data(contentsOf: asar) else { return false }
@@ -42,13 +58,8 @@ final class CodexAppPatcher {
         guard let r = data.range(of: original) else { return false }
         var d = data
         d.replaceSubrange(r, with: patched)
-        do {
-            try d.write(to: asar, options: .atomic)
-            return true
-        } catch {
-            Log.error("codex_app_patch_failed", "error", error.localizedDescription)
-            return false
-        }
+        try? d.write(to: asar, options: .atomic)
+        return true
     }
 
     private func showAlert() {
