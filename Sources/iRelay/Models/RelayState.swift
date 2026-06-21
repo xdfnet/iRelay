@@ -58,6 +58,8 @@ final class RelayState: ObservableObject {
         codexEnabled = UserDefaults.standard.object(forKey: Self.codexKey) as? Bool ?? true
 
         turnOn(model: model)
+        // 重启后补丁检查，权限不通则阻塞引导
+        syncCodexConfig()
     }
 
     private var server: HTTPServer?
