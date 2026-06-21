@@ -15,7 +15,7 @@ struct MenuBarView: View {
             state.setThinking(!state.thinkingEnabled)
         } label: {
             HStack {
-                Text("推理模式")
+                Text(verbatim: "推理模式")
                 Spacer()
                 if state.thinkingEnabled {
                     Image(systemName: "checkmark")
@@ -25,14 +25,13 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("设置密钥") { openApiKeyConfig(state: state) }
-        Button("打开日志") { Log.open() }
+        Button(action: { openApiKeyConfig(state: state) }) { Text(verbatim: "设置密钥") }
+        Button(action: { Log.open() }) { Text(verbatim: "打开日志") }
 
         Divider()
 
-        Button("退出") {
-            state.turnOff()
-            NSApplication.shared.terminate(nil)
+        Button(action: { state.turnOff(); NSApplication.shared.terminate(nil) }) {
+            Text(verbatim: "退出")
         }
         .keyboardShortcut("q")
     }
