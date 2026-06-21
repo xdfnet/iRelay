@@ -22,13 +22,11 @@ final class CodexConfigManager {
 
     @discardableResult
     func enable(model: String, port: UInt16) -> Bool {
-        // 1. 先打补丁（权限前置检查）
         guard patchAppAsar() else {
             Log.error("codex_config_enable_failed", "reason", "asar_patch_failed")
             return false
         }
 
-        // 2. 后写配置，失败则回滚 asar
         let raw = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
         let next = configureCodexTOML(raw, model: model, port: port)
         do {
@@ -37,48 +35,24 @@ final class CodexConfigManager {
             try next.write(to: configPath, atomically: true, encoding: .utf8)
             return true
         } catch {
-            Log.error("codex_config_enable_failed", "reason", "config_write_failed",
-                "error", error.localizedDescription, "rollback", "restore_asar")
-            appPatcher.restoreIfPossible()
-            appPatcher.deleteBackup()
+            Log.error("codex_config_enable_failed", "reason", "config_write_failed", "error", error.localizedDescription)
             return false
         }
     }
 
     @discardableResult
     func disable() -> Bool {
-        // 1. 先还原补丁（权限前置检查）
-        guard restoreAppAsar() else {
-            Log.error("codex_config_disable_failed", "reason", "asar_restore_failed")
-            return false
-        }
         appPatcher.stopGuard()
-
-        // 2. 后清配置，失败则回滚补丁
-        do {
-            if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
-                let next = disableCodexTOML(raw)
-                try next.write(to: configPath, atomically: true, encoding: .utf8)
-            }
-            try FileManager.default.removeItem(at: modelCatalogPath)
-            return true
-        } catch {
-            Log.error("codex_config_disable_failed", "reason", "config_clear_failed",
-                "error", error.localizedDescription, "rollback", "re-patch_asar")
-            appPatcher.ensurePatched()
-            return false
+        if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
+            let next = disableCodexTOML(raw)
+            try? next.write(to: configPath, atomically: true, encoding: .utf8)
         }
+        try? FileManager.default.removeItem(at: modelCatalogPath)
+        return true
     }
 
     @discardableResult
     func patchAppAsar() -> Bool { appPatcher.ensurePatched() }
-
-    @discardableResult
-    func restoreAppAsar() -> Bool {
-        let ok = appPatcher.restoreIfPossible()
-        if ok { appPatcher.deleteBackup() }
-        return ok
-    }
 
     // MARK: - TOML
 
