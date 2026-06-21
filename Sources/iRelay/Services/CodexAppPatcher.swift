@@ -12,15 +12,16 @@ final class CodexAppPatcher {
     /// 备份 → 打补丁，失败弹窗引导
     @discardableResult
     func ensurePatched() -> Bool {
+        guard let data = try? Data(contentsOf: asar) else { return false }
+        if data.range(of: patched) != nil { return true }
+        guard data.range(of: original) != nil else { return false }
+
         do {
-            // 1. 删除旧备份
             if FileManager.default.fileExists(atPath: backup.path) {
                 try FileManager.default.removeItem(at: backup)
             }
-            // 2. 备份
             try FileManager.default.copyItem(at: asar, to: backup)
-            // 3. 打补丁
-            return applyPatch()
+            return applyPatch(data)
         } catch {
             Log.error("codex_app_patch_failed", "error", error.localizedDescription)
             DispatchQueue.main.async { [self] in showAlert() }
@@ -45,16 +46,7 @@ final class CodexAppPatcher {
         }
     }
 
-    /// 删备份（enable 回滚用）
-    func deleteBackup() {
-        if FileManager.default.fileExists(atPath: backup.path) {
-            try? FileManager.default.removeItem(at: backup)
-        }
-    }
-
-    private func applyPatch() -> Bool {
-        guard let data = try? Data(contentsOf: asar) else { return false }
-        if data.range(of: patched) != nil { return true }
+    private func applyPatch(_ data: Data) -> Bool {
         guard let r = data.range(of: original) else { return false }
         var d = data
         d.replaceSubrange(r, with: patched)
@@ -74,7 +66,7 @@ final class CodexAppPatcher {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
                 NSWorkspace.shared.open(url)
             }
-            if !applyPatch() { showAlert() }
+            if !ensurePatched() { showAlert() }
         default:
             NSApp.terminate(nil)
         }
