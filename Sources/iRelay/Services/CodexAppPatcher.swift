@@ -5,8 +5,9 @@ import iRelayCore
 /// Patches the Codex desktop frontend model picker so custom non-OpenAI models
 /// are not filtered out by the remote GPT model allowlist.
 ///
-/// 启动 guard 后自动开启后台线程，每 60 秒验证补丁是否还在。
-/// Codex 升级后 asar 被恢复原样，guard 能在下一轮检测到并重新打补丁。
+/// 启动 guard 后每 10 秒做两件事：
+/// 1. 检查 App 管理权限 → 缺则弹窗引导用户
+/// 2. 检查 asar 补丁 → 丢了则自动重打
 final class CodexAppPatcher {
     private let appAsarPath = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
     private var backupPath: URL {
@@ -18,10 +19,11 @@ final class CodexAppPatcher {
     private let manualPatched = Data("s?t.has(n.model)||!n.model.startsWith(`gpt-`):!n.hidden".utf8)
 
     private var guardThreadActive = false
+    private var alertActive = false
 
     // MARK: - Public
 
-    /// 尝试打补丁，无论成败都会启动后台 guard 持续守护
+    /// 尝试打补丁，无论成败都启动后台 guard 持续守护
     @discardableResult
     func ensurePatched() -> Bool {
         defer { startGuard() }
@@ -99,7 +101,6 @@ final class CodexAppPatcher {
 
     // MARK: - Guard 线程
 
-    /// 每 60 秒检查一次补丁完整性，Codex 升级后自动重打
     private func startGuard() {
         guard !guardThreadActive else { return }
         guardThreadActive = true
@@ -108,46 +109,69 @@ final class CodexAppPatcher {
         t.start()
     }
 
+    /// 每 10 秒循环：①查权限 ②查补丁，各自独立
     private func guardLoop() {
         Log.info("codex_app_patch_guard_started")
 
         while guardThreadActive {
-            Thread.sleep(forTimeInterval: 60)
+            Thread.sleep(forTimeInterval: 10)
             guard guardThreadActive else { break }
-            guard FileManager.default.fileExists(atPath: appAsarPath.path) else { continue }
 
-            do {
-                let data = try Data(contentsOf: appAsarPath)
-                // 补丁还在 → 下一轮
-                if data.range(of: patched) != nil || data.range(of: manualPatched) != nil {
-                    continue
-                }
-                // 补丁丢了（Codex 升级了）→ 重打
-                guard let range = data.range(of: original) else { continue }
+            // ① 检查权限：尝试写入 asar（轻量探测）
+            checkPermission()
 
-                var next = data
-                next.replaceSubrange(range, with: patched)
-                try next.write(to: appAsarPath, options: .atomic)
-                Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
-            } catch {
-                let nsError = error as NSError
-                if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
-                    Log.error("codex_app_patch_permission_denied",
-                        "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-                } else {
-                    Log.info("codex_app_patch_guard_retry", "error", error.localizedDescription)
-                }
-            }
+            // ② 检查补丁：丢了就重打
+            ensurePatchIntact()
         }
 
         Log.info("codex_app_patch_guard_stopped")
     }
 
+    /// 探测 App 管理权限是否就绪
+    private func checkPermission() {
+        guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return }
+
+        // 尝试读→写回（不改变内容）来检测写入权限
+        guard let data = try? Data(contentsOf: appAsarPath) else { return }
+        do {
+            try data.write(to: appAsarPath, options: .atomic)
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
+                Log.error("codex_app_patch_permission_denied",
+                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+                showPermissionAlert()
+            }
+        }
+    }
+
+    /// 检查 asar 补丁完整性，丢了就自动重打
+    private func ensurePatchIntact() {
+        guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return }
+
+        guard let data = try? Data(contentsOf: appAsarPath) else { return }
+        // 补丁还在 → 不用管
+        if data.range(of: patched) != nil || data.range(of: manualPatched) != nil { return }
+        // 原始模式都没有 → 无法处理
+        guard let range = data.range(of: original) else { return }
+
+        do {
+            var next = data
+            next.replaceSubrange(range, with: patched)
+            try next.write(to: appAsarPath, options: .atomic)
+            Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
+        } catch {
+            Log.info("codex_app_patch_guard_retry", "error", error.localizedDescription)
+        }
+    }
+
     // MARK: - Alert
 
-    /// 弹窗提示用户前往系统设置授予 App 管理权限
+    /// 弹窗提示用户前往系统设置授予 App 管理权限（防重复）
     private func showPermissionAlert() {
-        DispatchQueue.main.async {
+        guard !alertActive else { return }
+        alertActive = true
+        DispatchQueue.main.async { [self] in
             let alert = NSAlert()
             alert.messageText = "需要「App 管理」权限"
             alert.informativeText = "iRelay 需要修改 Codex 桌面版才能显示 DeepSeek 模型。\n\n请前往：系统设置 → 隐私与安全性 → App 管理 → 开启 iRelay"
@@ -156,6 +180,7 @@ final class CodexAppPatcher {
             alert.alertStyle = .warning
 
             let response = alert.runModal()
+            alertActive = false
             if response == .alertFirstButtonReturn {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
                     NSWorkspace.shared.open(url)
