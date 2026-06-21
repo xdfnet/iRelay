@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import iRelayCore
 
 /// Patches the Codex desktop frontend model picker so custom non-OpenAI models
@@ -57,6 +58,7 @@ final class CodexAppPatcher {
             if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
                 Log.error("codex_app_patch_permission_denied", "error", error.localizedDescription,
                     "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+                showPermissionAlert()
             } else {
                 Log.error("codex_app_patch_failed", "error", error.localizedDescription)
             }
@@ -139,6 +141,27 @@ final class CodexAppPatcher {
         }
 
         Log.info("codex_app_patch_guard_stopped")
+    }
+
+    // MARK: - Alert
+
+    /// 弹窗提示用户前往系统设置授予 App 管理权限
+    private func showPermissionAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "需要「App 管理」权限"
+            alert.informativeText = "iRelay 需要修改 Codex 桌面版才能显示 DeepSeek 模型。\n\n请前往：系统设置 → 隐私与安全性 → App 管理 → 开启 iRelay"
+            alert.addButton(withTitle: "打开系统设置")
+            alert.addButton(withTitle: "稍后")
+            alert.alertStyle = .warning
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
     }
 
     // MARK: - Backup
