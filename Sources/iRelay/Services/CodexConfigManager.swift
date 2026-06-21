@@ -42,7 +42,6 @@ final class CodexConfigManager {
 
     @discardableResult
     func disable() -> Bool {
-        appPatcher.stopGuard()
         if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
             let next = disableCodexTOML(raw)
             try? next.write(to: configPath, atomically: true, encoding: .utf8)
