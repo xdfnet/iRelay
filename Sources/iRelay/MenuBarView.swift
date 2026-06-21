@@ -11,22 +11,6 @@ struct MenuBarView: View {
 
         Divider()
 
-        ForEach(state.availableModels) { model in
-            Button {
-                state.selectModel(model.id)
-            } label: {
-                HStack {
-                    Text(model.displayName)
-                    if state.codexEnabled, model.id == state.model {
-                        Spacer()
-                        Text("✓")
-                    }
-                }
-            }
-        }
-
-        Divider()
-
         Button {
             state.setThinking(!state.thinkingEnabled)
         } label: {

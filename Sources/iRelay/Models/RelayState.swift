@@ -133,6 +133,7 @@ final class RelayState: ObservableObject {
         if codexEnabled {
             disableCodex()
         } else if !apiKey.isEmpty {
+            model = "deepseek-v4-pro"
             codexEnabled = true
             syncCodexConfig()
         }
