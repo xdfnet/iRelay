@@ -30,9 +30,7 @@ cp Resources/Info.plist "$APP_CONTENTS/"
 cp Resources/AppIcon.icns "$APP_RESOURCES/"
 
 echo "==> 签名 (ad-hoc)..."
-codesign --force --sign - \
-    --entitlements Resources/iRelay.entitlements \
-    "$APP_BUNDLE"
+codesign --force --sign - "$APP_BUNDLE"
 
 if [ "$CONFIG" = "release" ]; then
     echo "==> 打包 zip..."
