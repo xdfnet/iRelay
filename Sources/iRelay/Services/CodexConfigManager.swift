@@ -48,6 +48,13 @@ final class CodexConfigManager {
 
     @discardableResult
     func disable() -> Bool {
+        // 1. 先还原 asar
+        guard appPatcher.restore() else {
+            Log.error("codex_config_disable_failed", "reason", "asar_restore_failed")
+            return false
+        }
+
+        // 2. 后清配置
         if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
             let next = disableCodexTOML(raw)
             try? next.write(to: configPath, atomically: true, encoding: .utf8)

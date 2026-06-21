@@ -8,7 +8,7 @@ final class CodexAppPatcher {
     private let original = Data("s?t.has(n.model):!n.hidden".utf8)
     private let patched  = Data("s?!n.hidden     :!n.hidden".utf8)
 
-    /// 打补丁，失败弹窗引导用户授权
+    /// 打补丁，失败弹窗引导
     @discardableResult
     func ensurePatched() -> Bool {
         if applyPatch() { return true }
@@ -16,11 +16,26 @@ final class CodexAppPatcher {
         return false
     }
 
-    /// 读取/写入 asar（供事务回滚使用）
+    /// 还原补丁（反向替换）
+    @discardableResult
+    func restore() -> Bool {
+        guard let data = try? Data(contentsOf: asar) else { return false }
+        guard let r = data.range(of: patched) else { return true } // 没打过就不用还原
+        var d = data
+        d.replaceSubrange(r, with: original)
+        do {
+            try d.write(to: asar, options: .atomic)
+            return true
+        } catch {
+            Log.error("codex_app_restore_failed", "error", error.localizedDescription)
+            return false
+        }
+    }
+
+    /// 读/写 asar（事务回滚用）
     func readAsar() -> Data? { try? Data(contentsOf: asar) }
     func writeAsar(_ data: Data) { try? data.write(to: asar, options: .atomic) }
 
-    /// 读 → 替换 → 写回
     private func applyPatch() -> Bool {
         guard let data = try? Data(contentsOf: asar) else { return false }
         if data.range(of: patched) != nil { return true }
