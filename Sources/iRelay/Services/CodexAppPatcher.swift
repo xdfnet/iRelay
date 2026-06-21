@@ -3,6 +3,9 @@ import AppKit
 import iRelayCore
 
 /// 管理 Codex 桌面版 app.asar 补丁
+///
+/// 启动时权限不通会阻塞引导，直到用户授权或退出 App。
+/// 启动成功后权限就是通的，后台只验补丁完整性，不再关心权限。
 final class CodexAppPatcher {
     private let appAsarPath = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
     private var backupPath: URL {
@@ -14,20 +17,22 @@ final class CodexAppPatcher {
     private let manualPatched = Data("s?t.has(n.model)||!n.model.startsWith(`gpt-`):!n.hidden".utf8)
 
     private var guardActive = false
-    private var alertActive = false
 
     // MARK: - Public
 
-    /// 打补丁（首次），失败弹窗引导，无论成败启动后台守护
+    /// 打补丁，权限不通则阻塞直到用户授权或退出
     @discardableResult
     func ensurePatched() -> Bool {
         defer { startGuard() }
 
-        let ok = applyPatch(notify: true)
-        if ok {
+        if applyPatch() {
             Log.info("codex_app_patch_ok", "status", "patched", "backup", backupPath.path)
+            return true
         }
-        return ok
+
+        // 权限不通 → 阻塞引导，不通别想用
+        showBlockingAlert()
+        return true // 能走到这说明权限通了
     }
 
     /// 还原补丁
@@ -55,26 +60,21 @@ final class CodexAppPatcher {
         try? FileManager.default.removeItem(at: backupPath)
     }
 
-    // MARK: - 核心补丁逻辑
+    // MARK: - 打补丁
 
     /// 读 asar → 备份 → 替换 → 写回，true = 成功
-    /// notify: 写入失败时是否弹窗引导权限
-    private func applyPatch(notify: Bool) -> Bool {
+    /// 写入失败不弹窗，由调用者决定是否引导
+    private func applyPatch() -> Bool {
         guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return false }
-
         guard let data = try? Data(contentsOf: appAsarPath) else { return false }
-        // 已打就不重复
         if data.range(of: patched) != nil || data.range(of: manualPatched) != nil { return true }
-        // 找不到原始模式也没法打
         guard let range = data.range(of: original) else { return false }
 
-        // 备份
         if FileManager.default.fileExists(atPath: backupPath.path) {
             try? FileManager.default.removeItem(at: backupPath)
         }
         try? FileManager.default.copyItem(at: appAsarPath, to: backupPath)
 
-        // 替换
         var next = data
         next.replaceSubrange(range, with: patched)
 
@@ -86,7 +86,6 @@ final class CodexAppPatcher {
             if e.domain == NSPOSIXErrorDomain && (e.code == EPERM || e.code == EACCES) {
                 Log.error("codex_app_patch_permission_denied",
                     "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-                if notify { showPermissionAlert() }
             } else {
                 Log.error("codex_app_patch_failed", "error", error.localizedDescription)
             }
@@ -94,7 +93,7 @@ final class CodexAppPatcher {
         }
     }
 
-    // MARK: - 后台守护
+    // MARK: - 守护线程
 
     private func startGuard() {
         guard !guardActive else { return }
@@ -102,7 +101,7 @@ final class CodexAppPatcher {
         Thread.detachNewThread { [weak self] in self?.guardLoop() }
     }
 
-    /// 每 60 秒 stat asar mtime，变了才静默重试补丁
+    /// 每 60 秒 stat asar mtime，变了就重打补丁
     private func guardLoop() {
         var lastMTime: Date?
 
@@ -114,8 +113,7 @@ final class CodexAppPatcher {
             if mtime == lastMTime { continue }
             lastMTime = mtime
 
-            // 静默重打（不弹窗），成了 Log，败了下轮再试
-            if applyPatch(notify: false) {
+            if applyPatch() {
                 Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
             }
         }
@@ -126,29 +124,35 @@ final class CodexAppPatcher {
         return a[.modificationDate] as? Date
     }
 
-    // MARK: - 权限弹窗
+    // MARK: - 阻塞权限引导
 
-    private func showPermissionAlert() {
-        guard !alertActive else { return }
-        alertActive = true
-        DispatchQueue.main.async { [self] in
-            let alert = NSAlert()
-            alert.messageText = "需要「App 管理」权限"
-            alert.informativeText = "iRelay 需要修改 Codex 桌面版才能显示 DeepSeek 模型。\n\n请前往：系统设置 → 隐私与安全性 → App 管理 → 开启 iRelay"
-            alert.addButton(withTitle: "打开系统设置")
-            alert.addButton(withTitle: "稍后")
-            alert.alertStyle = .warning
-            let r = alert.runModal()
-            alertActive = false
-            if r == .alertFirstButtonReturn {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
-                    NSWorkspace.shared.open(url)
+    /// 阻塞主线程循环弹窗，直到用户授权或退出 App
+    private func showBlockingAlert() {
+        DispatchQueue.main.sync {
+            while true {
+                let alert = NSAlert()
+                alert.messageText = "需要「App 管理」权限"
+                alert.informativeText = "iRelay 需要修改 Codex 桌面版才能显示 DeepSeek 模型。\n\n请前往：系统设置 → 隐私与安全性 → App 管理 → 开启 iRelay"
+                alert.addButton(withTitle: "打开系统设置")
+                alert.addButton(withTitle: "退出 iRelay")
+                alert.alertStyle = .warning
+
+                switch alert.runModal() {
+                case .alertFirstButtonReturn:
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
+                        NSWorkspace.shared.open(url)
+                    }
+                    // 回来自动重试，还不行继续弹
+                    if applyPatch() { return }
+
+                default:
+                    NSApp.terminate(nil)
                 }
             }
         }
     }
 
-    // MARK: - 备份查找
+    // MARK: - 备份
 
     private func restoreBackupPath() -> URL? {
         if FileManager.default.fileExists(atPath: backupPath.path) { return backupPath }
