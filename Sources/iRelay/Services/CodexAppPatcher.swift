@@ -16,6 +16,10 @@ final class CodexAppPatcher {
         return false
     }
 
+    /// 读取/写入 asar（供事务回滚使用）
+    func readAsar() -> Data? { try? Data(contentsOf: asar) }
+    func writeAsar(_ data: Data) { try? data.write(to: asar, options: .atomic) }
+
     /// 读 → 替换 → 写回
     private func applyPatch() -> Bool {
         guard let data = try? Data(contentsOf: asar) else { return false }

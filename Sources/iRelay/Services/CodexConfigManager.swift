@@ -22,11 +22,16 @@ final class CodexConfigManager {
 
     @discardableResult
     func enable(model: String, port: UInt16) -> Bool {
+        // 1. 缓存原始 asar，用于失败回滚
+        let asarBackup = appPatcher.readAsar()
+
+        // 2. 打补丁
         guard patchAppAsar() else {
             Log.error("codex_config_enable_failed", "reason", "asar_patch_failed")
             return false
         }
 
+        // 3. 写配置
         let raw = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
         let next = configureCodexTOML(raw, model: model, port: port)
         do {
@@ -35,7 +40,8 @@ final class CodexConfigManager {
             try next.write(to: configPath, atomically: true, encoding: .utf8)
             return true
         } catch {
-            Log.error("codex_config_enable_failed", "reason", "config_write_failed", "error", error.localizedDescription)
+            Log.error("codex_config_enable_failed", "reason", "config_write_failed", "rollback", "asar")
+            if let bak = asarBackup { appPatcher.writeAsar(bak) }
             return false
         }
     }
