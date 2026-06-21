@@ -161,7 +161,7 @@ final class CodexConfigManager {
             "visibility": "list",
             "supported_in_api": true,
             "priority": priority,
-            "base_instructions": "You are a helpful AI assistant powered by DeepSeek.",
+            "base_instructions": "You are an AI coding assistant powered by DeepSeek. You have a 1M token context window and support multiple reasoning levels (none/low/medium/high/xhigh). You excel at understanding large codebases, editing files, running shell commands, and reasoning through complex engineering problems. Think step by step before acting. Use tools proactively to explore, verify, and iterate. Be direct, concise, and helpful.",
             "supports_reasoning_summaries": true,
             "default_reasoning_summary": "concise",
             "support_verbosity": true,
