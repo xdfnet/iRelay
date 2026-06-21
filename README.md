@@ -13,13 +13,13 @@
 
 | 功能 | 说明 |
 |------|------|
-| 模型切换 | 从 DeepSeek API 实时获取模型列表，选中即写入 Codex 配置 |
+| 一键集成 | 开启后自动配置 Codex 使用 iRelay 中转，默认使用 DeepSeek V4 Pro |
 | 思考模式 | 一键开关 DeepSeek 推理模式 |
 | API Key | 窗口配置 DeepSeek API Key |
 | 端口固定 | 固定 `8787`，即开即用 |
-| 模型元数据 | 自动为 Codex 提供完整模型信息（context_window、base_instructions 等），消除 fallback 警告 |
-| Codex App 适配 | 自动修补 Codex 桌面 App 的模型白名单过滤，让 DeepSeek 模型显示在模型菜单中 |
-| Chat 透传 | 额外提供 `/v1/chat/completions` 直通接口，流式/非流式均支持 |
+| 模型元数据 | 自动为 Codex 提供完整模型信息，消除 fallback 警告 |
+| Codex App 适配 | 自动修补桌面版模型白名单过滤，让 DeepSeek 模型可用 |
+| Chat 透传 | 额外提供 `/v1/chat/completions` 直通接口 |
 
 ## 要求
 
@@ -58,9 +58,8 @@ open iRelay.app               # 启动
 ## 使用
 
 1. 启动 iRelay，点击菜单栏图标 → **配置 → API 密钥** → 输入 DeepSeek API Key
-2. API Key 生效后自动拉取模型列表
-3. 在菜单栏选择模型 → 自动写入 Codex 配置并启用中转
-4. 可在菜单栏切换模型、开关思考模式、关闭 iRelay 模型提供
+2. 点击菜单栏图标 → **开启 Codex 集成** → 自动完成补丁 + 配置
+3. 开关思考模式、关闭集成等均在菜单栏操作
 
 首次使用后重启 Codex，它会自动从 iRelay 获取模型列表。
 
@@ -70,7 +69,7 @@ open iRelay.app               # 启动
 
 ```
 MenuBarExtra (SwiftUI)
-  ├─ 模型 / 模式 / 配置 / 退出
+  ├─ 开启/关闭集成 / 推理模式 / 配置 / 退出
   ├─ RelayState     — 全局状态（apiKey / model / thinking）
   │   └─ UserDefaults 持久化 + 模型列表缓存
   ├─ CodexConfigManager — ~/.codex/config.toml
