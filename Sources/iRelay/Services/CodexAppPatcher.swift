@@ -13,6 +13,8 @@ final class CodexAppPatcher {
     private let patched = Data("s?!n.hidden     :!n.hidden".utf8)
     private let manualPatched = Data("s?t.has(n.model)||!n.model.startsWith(`gpt-`):!n.hidden".utf8)
 
+    private var polling = false
+
     @discardableResult
     func ensurePatched() -> Bool {
         guard FileManager.default.fileExists(atPath: appAsarPath.path) else {
@@ -43,13 +45,68 @@ final class CodexAppPatcher {
             Log.info("codex_app_patch_ok", "status", "patched", "backup", backupPath.path)
             return true
         } catch {
-            Log.error("codex_app_patch_failed", "error", error.localizedDescription)
+            let nsError = error as NSError
+            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
+                Log.error("codex_app_patch_permission_denied", "error", error.localizedDescription,
+                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+                startPolling()
+            } else {
+                Log.error("codex_app_patch_failed", "error", error.localizedDescription)
+            }
             return false
         }
     }
 
+    // MARK: - 权限轮询
+
+    /// 每 5 秒重试一次补丁，权限就绪后自动打上
+    private func startPolling() {
+        guard !polling else { return }
+        polling = true
+        let t = Thread { [weak self] in self?.pollLoop() }
+        t.name = "com.xdf.irelay.codex-patcher"
+        t.start()
+    }
+
+    private func pollLoop() {
+        Log.info("codex_app_patch_polling_started")
+
+        while polling {
+            Thread.sleep(forTimeInterval: 5)
+
+            guard polling else { break }
+            guard FileManager.default.fileExists(atPath: appAsarPath.path) else { continue }
+
+            do {
+                let data = try Data(contentsOf: appAsarPath)
+                if data.range(of: patched) != nil || data.range(of: manualPatched) != nil {
+                    Log.info("codex_app_patch_ok", "status", "polling_already_patched")
+                    break
+                }
+                guard let range = data.range(of: original) else { continue }
+
+                var next = data
+                next.replaceSubrange(range, with: patched)
+                try next.write(to: appAsarPath, options: .atomic)
+                Log.info("codex_app_patch_ok", "status", "polling_patched")
+                break
+            } catch {
+                let nsError = error as NSError
+                if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
+                    continue // 权限未就绪，继续轮询
+                }
+                Log.error("codex_app_patch_polling_stopped", "error", error.localizedDescription)
+                break
+            }
+        }
+
+        polling = false
+        Log.info("codex_app_patch_polling_stopped")
+    }
+
     @discardableResult
     func restoreIfPossible() -> Bool {
+        polling = false
         guard let source = restoreBackupPath() else {
             Log.info("codex_app_restore_skip", "reason", "backup_missing")
             return true
