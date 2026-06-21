@@ -5,9 +5,8 @@ import iRelayCore
 /// Patches the Codex desktop frontend model picker so custom non-OpenAI models
 /// are not filtered out by the remote GPT model allowlist.
 ///
-/// 启动 guard 后每 10 秒做两件事：
-/// 1. 检查 App 管理权限 → 缺则弹窗引导用户
-/// 2. 检查 asar 补丁 → 丢了则自动重打
+/// 启动 guard 后每 60 秒 stat 一次 asar mtime，变了才读内容验补丁。
+/// Codex 升级后 asar 被恢复原样时自动重打，权限不足时弹窗引导。
 final class CodexAppPatcher {
     private let appAsarPath = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
     private var backupPath: URL {
@@ -23,7 +22,6 @@ final class CodexAppPatcher {
 
     // MARK: - Public
 
-    /// 尝试打补丁，无论成败都启动后台 guard 持续守护
     @discardableResult
     func ensurePatched() -> Bool {
         defer { startGuard() }
@@ -58,7 +56,7 @@ final class CodexAppPatcher {
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
-                Log.error("codex_app_patch_permission_denied", "error", error.localizedDescription,
+                Log.error("codex_app_patch_permission_denied",
                     "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
                 showPermissionAlert()
             } else {
@@ -68,7 +66,6 @@ final class CodexAppPatcher {
         }
     }
 
-    /// 恢复原始 asar（不操作 guard，由调用方处理）
     @discardableResult
     func restoreIfPossible() -> Bool {
         guard let source = restoreBackupPath() else {
@@ -99,7 +96,7 @@ final class CodexAppPatcher {
         }
     }
 
-    // MARK: - Guard 线程
+    // MARK: - Guard
 
     private func startGuard() {
         guard !guardThreadActive else { return }
@@ -109,50 +106,37 @@ final class CodexAppPatcher {
         t.start()
     }
 
-    /// 每 10 秒循环：①查权限 ②查补丁，各自独立
+    /// 每 60 秒 stat 一次 asar mtime，变了才读内容验补丁
     private func guardLoop() {
         Log.info("codex_app_patch_guard_started")
+        var lastMTime: Date?
 
         while guardThreadActive {
-            Thread.sleep(forTimeInterval: 10)
+            Thread.sleep(forTimeInterval: 60)
             guard guardThreadActive else { break }
 
-            // ① 检查权限：尝试写入 asar（轻量探测）
-            checkPermission()
+            let mtime = fileModificationDate()
+            if mtime == lastMTime { continue }
+            lastMTime = mtime
 
-            // ② 检查补丁：丢了就重打
             ensurePatchIntact()
         }
 
         Log.info("codex_app_patch_guard_stopped")
     }
 
-    /// 探测 App 管理权限是否就绪
-    private func checkPermission() {
-        guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return }
-
-        // 尝试读→写回（不改变内容）来检测写入权限
-        guard let data = try? Data(contentsOf: appAsarPath) else { return }
-        do {
-            try data.write(to: appAsarPath, options: .atomic)
-        } catch {
-            let nsError = error as NSError
-            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
-                Log.error("codex_app_patch_permission_denied",
-                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-                showPermissionAlert()
-            }
-        }
+    /// 轻量 stat，不读文件内容
+    private func fileModificationDate() -> Date? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: appAsarPath.path) else { return nil }
+        return attrs[.modificationDate] as? Date
     }
 
-    /// 检查 asar 补丁完整性，丢了就自动重打
+    /// 读 asar 检查补丁，丢了就重打（写入失败会弹权限引导）
     private func ensurePatchIntact() {
         guard FileManager.default.fileExists(atPath: appAsarPath.path) else { return }
 
         guard let data = try? Data(contentsOf: appAsarPath) else { return }
-        // 补丁还在 → 不用管
         if data.range(of: patched) != nil || data.range(of: manualPatched) != nil { return }
-        // 原始模式都没有 → 无法处理
         guard let range = data.range(of: original) else { return }
 
         do {
@@ -161,7 +145,14 @@ final class CodexAppPatcher {
             try next.write(to: appAsarPath, options: .atomic)
             Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
         } catch {
-            Log.info("codex_app_patch_guard_retry", "error", error.localizedDescription)
+            let nsError = error as NSError
+            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
+                Log.error("codex_app_patch_permission_denied",
+                    "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+                showPermissionAlert()
+            } else {
+                Log.info("codex_app_patch_guard_retry", "error", error.localizedDescription)
+            }
         }
     }
 
