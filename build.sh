@@ -29,26 +29,10 @@ cp "$BINARY_PATH" "$APP_MACOS/$PROJECT"
 cp Resources/Info.plist "$APP_CONTENTS/"
 cp Resources/AppIcon.icns "$APP_RESOURCES/"
 
-echo "==> 签名..."
-
-# 自动查找第一个有效的签名证书（非 REVOKED / EXPIRED）
-CERT=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -v "REVOKED\|EXPIRED" \
-    | grep -oE '"[^"]+"' | head -1 | tr -d '"')
-
-if [ -n "$CERT" ]; then
-    echo "   使用证书: $CERT"
-    codesign --force --sign "$CERT" \
-        --entitlements Resources/iRelay.entitlements \
-        --options runtime \
-        --timestamp \
-        "$APP_BUNDLE"
-else
-    echo "   无有效证书，使用 ad-hoc 签名"
-    codesign --force --sign - \
-        --entitlements Resources/iRelay.entitlements \
-        "$APP_BUNDLE"
-fi
+echo "==> 签名 (ad-hoc)..."
+codesign --force --sign - \
+    --entitlements Resources/iRelay.entitlements \
+    "$APP_BUNDLE"
 
 if [ "$CONFIG" = "release" ]; then
     echo "==> 打包 zip..."
