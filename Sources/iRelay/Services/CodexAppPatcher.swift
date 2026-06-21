@@ -3,6 +3,9 @@ import iRelayCore
 
 /// Patches the Codex desktop frontend model picker so custom non-OpenAI models
 /// are not filtered out by the remote GPT model allowlist.
+///
+/// 启动 guard 后自动开启后台线程，每 60 秒验证补丁是否还在。
+/// Codex 升级后 asar 被恢复原样，guard 能在下一轮检测到并重新打补丁。
 final class CodexAppPatcher {
     private let appAsarPath = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
     private var backupPath: URL {
@@ -13,10 +16,15 @@ final class CodexAppPatcher {
     private let patched = Data("s?!n.hidden     :!n.hidden".utf8)
     private let manualPatched = Data("s?t.has(n.model)||!n.model.startsWith(`gpt-`):!n.hidden".utf8)
 
-    private var polling = false
+    private var guardThreadActive = false
 
+    // MARK: - Public
+
+    /// 尝试打补丁，无论成败都会启动后台 guard 持续守护
     @discardableResult
     func ensurePatched() -> Bool {
+        defer { startGuard() }
+
         guard FileManager.default.fileExists(atPath: appAsarPath.path) else {
             Log.error("codex_app_patch_failed", "reason", "app_asar_missing", "path", appAsarPath.path)
             return false
@@ -49,7 +57,6 @@ final class CodexAppPatcher {
             if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
                 Log.error("codex_app_patch_permission_denied", "error", error.localizedDescription,
                     "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
-                startPolling()
             } else {
                 Log.error("codex_app_patch_failed", "error", error.localizedDescription)
             }
@@ -57,56 +64,10 @@ final class CodexAppPatcher {
         }
     }
 
-    // MARK: - 权限轮询
-
-    /// 每 5 秒重试一次补丁，权限就绪后自动打上
-    private func startPolling() {
-        guard !polling else { return }
-        polling = true
-        let t = Thread { [weak self] in self?.pollLoop() }
-        t.name = "com.xdf.irelay.codex-patcher"
-        t.start()
-    }
-
-    private func pollLoop() {
-        Log.info("codex_app_patch_polling_started")
-
-        while polling {
-            Thread.sleep(forTimeInterval: 5)
-
-            guard polling else { break }
-            guard FileManager.default.fileExists(atPath: appAsarPath.path) else { continue }
-
-            do {
-                let data = try Data(contentsOf: appAsarPath)
-                if data.range(of: patched) != nil || data.range(of: manualPatched) != nil {
-                    Log.info("codex_app_patch_ok", "status", "polling_already_patched")
-                    break
-                }
-                guard let range = data.range(of: original) else { continue }
-
-                var next = data
-                next.replaceSubrange(range, with: patched)
-                try next.write(to: appAsarPath, options: .atomic)
-                Log.info("codex_app_patch_ok", "status", "polling_patched")
-                break
-            } catch {
-                let nsError = error as NSError
-                if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
-                    continue // 权限未就绪，继续轮询
-                }
-                Log.error("codex_app_patch_polling_stopped", "error", error.localizedDescription)
-                break
-            }
-        }
-
-        polling = false
-        Log.info("codex_app_patch_polling_stopped")
-    }
-
+    /// 恢复原始 asar 并停止 guard
     @discardableResult
     func restoreIfPossible() -> Bool {
-        polling = false
+        stopGuard()
         guard let source = restoreBackupPath() else {
             Log.info("codex_app_restore_skip", "reason", "backup_missing")
             return true
@@ -122,7 +83,6 @@ final class CodexAppPatcher {
         }
     }
 
-    /// 删除备份文件（恢复成功后调用）
     func deleteBackup() {
         let path = backupPath.path
         guard FileManager.default.fileExists(atPath: path) else { return }
@@ -133,6 +93,58 @@ final class CodexAppPatcher {
             Log.error("codex_app_backup_delete_failed", "error", error.localizedDescription)
         }
     }
+
+    // MARK: - Guard 线程
+
+    /// 每 60 秒检查一次补丁完整性，Codex 升级后自动重打
+    private func startGuard() {
+        guard !guardThreadActive else { return }
+        guardThreadActive = true
+        let t = Thread { [weak self] in self?.guardLoop() }
+        t.name = "com.xdf.irelay.codex-patcher"
+        t.start()
+    }
+
+    private func stopGuard() {
+        guardThreadActive = false
+    }
+
+    private func guardLoop() {
+        Log.info("codex_app_patch_guard_started")
+
+        while guardThreadActive {
+            Thread.sleep(forTimeInterval: 60)
+            guard guardThreadActive else { break }
+            guard FileManager.default.fileExists(atPath: appAsarPath.path) else { continue }
+
+            do {
+                let data = try Data(contentsOf: appAsarPath)
+                // 补丁还在 → 下一轮
+                if data.range(of: patched) != nil || data.range(of: manualPatched) != nil {
+                    continue
+                }
+                // 补丁丢了（Codex 升级了）→ 重打
+                guard let range = data.range(of: original) else { continue }
+
+                var next = data
+                next.replaceSubrange(range, with: patched)
+                try next.write(to: appAsarPath, options: .atomic)
+                Log.info("codex_app_patch_ok", "status", "guard_patched_after_update")
+            } catch {
+                let nsError = error as NSError
+                if nsError.domain == NSPOSIXErrorDomain && (nsError.code == EPERM || nsError.code == EACCES) {
+                    Log.error("codex_app_patch_permission_denied",
+                        "hint", "请前往 系统设置 → 隐私与安全性 → App 管理 → 启用 iRelay")
+                } else {
+                    Log.info("codex_app_patch_guard_retry", "error", error.localizedDescription)
+                }
+            }
+        }
+
+        Log.info("codex_app_patch_guard_stopped")
+    }
+
+    // MARK: - Backup
 
     private func restoreBackupPath() -> URL? {
         if FileManager.default.fileExists(atPath: backupPath.path) {
