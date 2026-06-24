@@ -16,9 +16,44 @@ struct iRelayApp: App {
         MenuBarExtra {
             MenuBarView(state: state)
         } label: {
-            Image(systemName: state.codexEnabled ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+            MenuBarIcon(codexEnabled: state.codexEnabled, isActive: state.activeRequestCount > 0)
         }
         .menuBarExtraStyle(.menu)
+    }
+}
+
+// MARK: - 菜单栏图标（支持闪烁）
+
+struct MenuBarIcon: View {
+    let codexEnabled: Bool
+    let isActive: Bool
+    @State private var showFilled = true
+
+    init(codexEnabled: Bool, isActive: Bool) {
+        self.codexEnabled = codexEnabled
+        self.isActive = isActive
+    }
+
+    var iconName: String {
+        guard codexEnabled else { return "antenna.radiowaves.left.and.right.slash.circle.fill" }
+        guard isActive else { return "antenna.radiowaves.left.and.right.circle.fill" }
+        return showFilled
+            ? "antenna.radiowaves.left.and.right.circle.fill"
+            : "antenna.radiowaves.left.and.right.circle"
+    }
+
+    var body: some View {
+        Image(systemName: iconName)
+            .task(id: isActive) {
+                guard isActive else {
+                    showFilled = true
+                    return
+                }
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    showFilled.toggle()
+                }
+            }
     }
 }
 

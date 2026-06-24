@@ -21,6 +21,7 @@ final class RelayState: ObservableObject {
     @Published var apiKey: String = "" {
         didSet { UserDefaults.standard.set(apiKey, forKey: Self.keychainKey) }
     }
+    @Published var activeRequestCount: Int = 0
     @Published var codexEnabled: Bool {
         didSet { UserDefaults.standard.set(codexEnabled, forKey: Self.codexKey) }
     }
@@ -83,6 +84,16 @@ final class RelayState: ObservableObject {
         var p = ProviderConfig.deepSeek
         p.thinkingMode = thinkingEnabled ? .deepseekStyle : .none
         let h = RelayHandler(client: c, provider: p)
+        h.onRequestActive = { [weak self] in
+            Task { @MainActor in
+                self?.activeRequestCount += 1
+            }
+        }
+        h.onRequestInactive = { [weak self] in
+            Task { @MainActor in
+                self?.activeRequestCount = max(0, (self?.activeRequestCount ?? 0) - 1)
+            }
+        }
         handler = h
 
         let httpServer = HTTPServer()
@@ -106,6 +117,7 @@ final class RelayState: ObservableObject {
         Log.info("service_stopping")
         stopServer()
         status = .stopped
+        activeRequestCount = 0
     }
 
     func selectModel(_ id: String) {

@@ -376,6 +376,12 @@ NWConnection 是传输层 API。项目用约 200 行手写了 HTTP/1.1 请求解
 
 ## 协议适配历史
 
+### 2026-06-24：v2.1.5 数据流闪烁指示
+- 新增 `activeRequestCount` 追踪活跃请求
+- `RelayHandler` 添加 `onRequestActive`/`onRequestInactive` 回调，覆盖所有请求路径
+- 菜单栏图标在有数据流时闪烁（`circle.fill` ↔ `circle` 交替），无请求时静态实心
+- 关闭服务时自动归零请求计数
+
 ### 2026-06-15：v2.1.0 简化重构 — 纯 DeepSeek + 固定端口 + Chat 透传
 
 - 移除多提供商架构：删除 `ProviderStore`，`RelayState` 直接持有 `apiKey`/`model`/`thinkingEnabled`

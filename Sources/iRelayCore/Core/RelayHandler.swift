@@ -9,6 +9,8 @@ public typealias JSON = [String: Any]
 public final class RelayHandler {
     public let client: ChatClient
     public var provider: ProviderConfig
+    public var onRequestActive: (() -> Void)?
+    public var onRequestInactive: (() -> Void)?
 
     public init(client: ChatClient, provider: ProviderConfig) {
         self.client = client
@@ -82,7 +84,9 @@ public final class RelayHandler {
     // MARK: - 非流式
 
     private func handleNonStream(conn: ServerConnection, payload: JSON, model: String, start: Date) {
+        onRequestActive?()
         Task {
+            defer { onRequestInactive?() }
             do {
                 let (chat, status) = try await client.chat(payload: payload)
                 let dur = Log.msSince(start)
@@ -122,9 +126,11 @@ public final class RelayHandler {
         }
         let stream = body["stream"] as? Bool ?? false
 
+        onRequestActive?()
         if stream {
             conn.startSSE()
             Task {
+                defer { onRequestInactive?() }
                 do {
                     let events = client.chatStream(payload: body)
                     for try await event in events {
@@ -142,6 +148,7 @@ public final class RelayHandler {
             }
         } else {
             Task {
+                defer { onRequestInactive?() }
                 do {
                     let (chat, status) = try await client.chat(payload: body)
                     conn.sendJSON(status: status, body: chat)
@@ -161,6 +168,7 @@ public final class RelayHandler {
     // MARK: - 流式
 
     private func handleStream(conn: ServerConnection, payload: JSON, model: String, start: Date) {
+        onRequestActive?()
         conn.startSSE()
 
         let responseID = "resp_" + randomID()
@@ -187,6 +195,7 @@ public final class RelayHandler {
         ])
 
         Task {
+            defer { onRequestInactive?() }
             var messageID = ""
             var messageOutputIndex = -1
             var textStarted = false
