@@ -12,6 +12,13 @@ public final class RelayHandler {
     public var onRequestActive: (() -> Void)?
     public var onRequestInactive: (() -> Void)?
 
+    /// 非 DeepSeek 模型统一转成用户默认模型
+    private static func resolveModel(_ requested: String) -> String {
+        let valid = ["deepseek-v4-pro", "deepseek-v4-flash"]
+        if valid.contains(requested) { return requested }
+        return UserDefaults.standard.string(forKey: "irelay_model") ?? "deepseek-v4-flash"
+    }
+
     public init(client: ChatClient, provider: ProviderConfig) {
         self.client = client
         self.provider = provider
@@ -53,17 +60,21 @@ public final class RelayHandler {
             return
         }
 
-        let model = body["model"] as? String ?? (UserDefaults.standard.string(forKey: "irelay_model") ?? "deepseek-v4-pro")
+        let rawModel = body["model"] as? String ?? ""
+        let model = Self.resolveModel(rawModel)
         let stream = body["stream"] as? Bool ?? false
         let tools = body["tools"] as? [JSON] ?? []
         let instructions = body["instructions"] as? String ?? ""
         let maxTokens = body["max_output_tokens"] as? Int ?? 0
+        let reasoningEffort = (body["reasoning"] as? JSON)?["effort"] as? String ?? "none"
         let start = Date()
 
         Log.info("codex_request",
             "model", model,
+            "requested_model", rawModel.isEmpty ? model : rawModel,
             "stream", stream,
             "tools", tools.count,
+            "reasoning_effort", reasoningEffort,
             "input", Log.summaryInput(body["input"]),
             "instructions", instructions.isEmpty ? "" : Log.summaryInput(instructions),
             "max_tokens", maxTokens)
@@ -125,6 +136,11 @@ public final class RelayHandler {
             return
         }
         let stream = body["stream"] as? Bool ?? false
+        // 模型重写
+        var forwarded = body
+        if let rawModel = body["model"] as? String {
+            forwarded["model"] = Self.resolveModel(rawModel)
+        }
 
         onRequestActive?()
         if stream {
@@ -132,7 +148,7 @@ public final class RelayHandler {
             Task {
                 defer { onRequestInactive?() }
                 do {
-                    let events = client.chatStream(payload: body)
+                    let events = client.chatStream(payload: forwarded)
                     for try await event in events {
                         if let data = try? JSONSerialization.data(withJSONObject: event),
                            let jsonStr = String(data: data, encoding: .utf8) {
@@ -150,7 +166,7 @@ public final class RelayHandler {
             Task {
                 defer { onRequestInactive?() }
                 do {
-                    let (chat, status) = try await client.chat(payload: body)
+                    let (chat, status) = try await client.chat(payload: forwarded)
                     conn.sendJSON(status: status, body: chat)
                 } catch {
                     conn.sendJSON(status: 502, body: ["error": error.localizedDescription])
@@ -497,7 +513,7 @@ public final class RelayHandler {
         let temp = body["temperature"] as? Double
         let topP = body["top_p"] as? Double
         let maxTokens = body["max_output_tokens"] as? Int
-        let model = body["model"] as? String ?? (UserDefaults.standard.string(forKey: "irelay_model") ?? "deepseek-v4-pro")
+        let model = Self.resolveModel(body["model"] as? String ?? "")
         let stream = body["stream"] as? Bool ?? false
 
         guard let messages = parseInput(instructions: instructions, input: rawInput) else {
@@ -527,8 +543,10 @@ public final class RelayHandler {
 
         switch provider.thinkingMode {
         case .deepseekStyle:
-            payload["thinking"] = ["type": "enabled"] as JSON
-            if let reasoning = body["reasoning"] as? JSON, let effort = reasoning["effort"] {
+            if let reasoning = body["reasoning"] as? JSON,
+               let effort = reasoning["effort"] as? String,
+               effort != "none" {
+                payload["thinking"] = ["type": "enabled"] as JSON
                 payload["reasoning_effort"] = effort
             }
         case .none:

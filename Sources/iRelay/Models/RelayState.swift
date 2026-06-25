@@ -15,9 +15,6 @@ final class RelayState: ObservableObject {
         didSet { UserDefaults.standard.set(model, forKey: Self.modelKey) }
     }
     @Published var availableModels: [ModelInfo] = RelayState.loadModels()
-    @Published var thinkingEnabled: Bool {
-        didSet { UserDefaults.standard.set(thinkingEnabled, forKey: Self.thinkingKey) }
-    }
     @Published var apiKey: String = "" {
         didSet { UserDefaults.standard.set(apiKey, forKey: Self.keychainKey) }
     }
@@ -29,7 +26,6 @@ final class RelayState: ObservableObject {
 
     private static let keychainKey = "irelay_apiKey"
     static let modelKey = "irelay_model"
-    private static let thinkingKey = "irelay_thinking"
     private static let codexKey = "irelay_codexEnabled"
     private static func saveModels(_ models: [ModelInfo]) {
         guard let data = try? JSONEncoder().encode(models) else { return }
@@ -50,15 +46,15 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.1.6"
-    @Published var isCodexPatched: Bool
+    static let version = "2.1.7"
+
+    /// 实时读文件判断补丁状态
+    var isCodexPatched: Bool { codexConfigManager.isPatched }
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Self.keychainKey) ?? ""
         model = UserDefaults.standard.string(forKey: Self.modelKey) ?? "deepseek-v4-pro"
-        thinkingEnabled = UserDefaults.standard.object(forKey: Self.thinkingKey) as? Bool ?? true
         codexEnabled = UserDefaults.standard.object(forKey: Self.codexKey) as? Bool ?? true
-        isCodexPatched = codexConfigManager.isPatched
 
         turnOn(model: model)
     }
@@ -83,9 +79,7 @@ final class RelayState: ObservableObject {
 
         let c = ChatClient(apiKey: apiKey, baseURL: upstreamURL)
         client = c
-        var p = ProviderConfig.deepSeek
-        p.thinkingMode = thinkingEnabled ? .deepseekStyle : .none
-        let h = RelayHandler(client: c, provider: p)
+        let h = RelayHandler(client: c, provider: ProviderConfig.deepSeek)
         h.onRequestActive = { [weak self] in
             Task { @MainActor in
                 self?.activeRequestCount += 1
@@ -158,26 +152,15 @@ final class RelayState: ObservableObject {
                 Log.error("codex_asar_restore_failed")
                 return
             }
-            isCodexPatched = false
             Log.info("codex_asar_restored")
         } else {
             guard codexConfigManager.patchAppAsar() else {
                 Log.error("codex_asar_patch_failed")
                 return
             }
-            isCodexPatched = true
             Log.info("codex_asar_patched")
         }
-    }
-
-    func toggleThinking() { setThinking(!thinkingEnabled) }
-
-    func setThinking(_ enabled: Bool) {
-        thinkingEnabled = enabled
-        var p = ProviderConfig.deepSeek
-        p.thinkingMode = enabled ? .deepseekStyle : .none
-        handler?.provider = p
-        Log.info("thinking_toggled", "enabled", thinkingEnabled)
+        objectWillChange.send()
     }
 
     func saveApiKey(_ key: String) -> Bool {

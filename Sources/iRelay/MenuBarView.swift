@@ -17,14 +17,6 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button {
-            state.setThinking(!state.thinkingEnabled)
-        } label: {
-            Text(verbatim: state.thinkingEnabled ? "关闭推理" : "开启推理")
-        }
-
-        Divider()
-
         Button(action: { openApiKeyConfig(state: state) }) { Text(verbatim: "设置密钥") }
         Button(action: { Log.open() }) { Text(verbatim: "打开日志") }
 

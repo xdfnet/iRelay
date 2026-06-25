@@ -17,7 +17,7 @@
 | 补丁开关 | 独立修补 Codex 桌面版模型白名单过滤，与代理解耦 |
 | 权限检查 | 操作前检测 App 管理权限，未授权弹窗引导 |
 | 数据流指示 | 菜单栏图标在有请求流经时闪烁，实时反映中转服务活跃状态 |
-| 思考模式 | 一键开关 DeepSeek 推理模式 |
+| 模型重写 | 非 DeepSeek 模型自动转成已配置的 DeepSeek 模型 |
 | API Key | 窗口配置 DeepSeek API Key |
 | 端口固定 | 固定 `8787`，即开即用 |
 | 模型元数据 | 自动为 Codex 提供完整模型信息，消除 fallback 警告 |
@@ -62,7 +62,7 @@ open iRelay.app               # 启动
 1. 启动 iRelay，点击菜单栏图标 → **设置密钥** → 输入 DeepSeek API Key
 2. 点击 **开启补丁** → 授权 App 管理权限 → 修补 Codex 模型白名单
 3. 点击 **开启代理** → 配置 Codex 使用 iRelay 中转
-4. 开关思考模式、关闭代理/补丁等均在菜单栏操作
+4. 开关代理、打补丁等均在菜单栏操作
 
 首次使用后重启 Codex，它会自动从 iRelay 获取模型列表。
 
@@ -72,7 +72,7 @@ open iRelay.app               # 启动
 
 ```
 MenuBarExtra (SwiftUI)
-  ├─ 开启/关闭代理 / 开启/关闭补丁 / 开启/关闭推理 / 配置 / 退出
+  ├─ 开启/关闭代理 / 开启/关闭补丁 / 配置 / 退出
   ├─ RelayState     — 全局状态（apiKey / model / thinking / isCodexPatched）
   │   └─ UserDefaults 持久化 + 模型列表缓存
   ├─ CodexConfigManager — ~/.codex/config.toml
