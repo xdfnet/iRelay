@@ -7,6 +7,7 @@ final class MenuBarController: NSObject {
     private let state: RelayState
     private var blinkTimer: Timer?
     private var showFilled = true
+    private var balanceText: String?
 
     init(state: RelayState) {
         self.state = state
@@ -68,9 +69,45 @@ final class MenuBarController: NSObject {
         showFilled = true
     }
 
+    // MARK: - 余额查询
+
+    /// 同步查询余额，每次点菜单都实时拉取
+    private func fetchBalance() -> String? {
+        guard !state.apiKey.isEmpty,
+              let url = URL(string: "https://api.deepseek.com/user/balance") else { return nil }
+
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(state.apiKey)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 3
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: String?
+
+        let task = URLSession.shared.dataTask(with: req) { data, _, error in
+            defer { semaphore.signal() }
+            guard let data, error == nil,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let infos = json["balance_infos"] as? [[String: Any]] else {
+                result = "余额查询失败"
+                return
+            }
+            let parts = infos.compactMap { info -> String? in
+                guard let currency = info["currency"] as? String,
+                      let balance = info["total_balance"] as? String else { return nil }
+                let symbol = currency == "CNY" ? "¥" : "$"
+                return "\(symbol)\(balance)"
+            }
+            result = parts.isEmpty ? "余额查询失败" : parts.joined(separator: " / ")
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + 3.5)
+        return result
+    }
+
     // MARK: - Menu
 
     @objc private func buttonClicked() {
+        balanceText = fetchBalance()
         statusItem?.menu = buildMenu()
         statusItem?.button?.performClick(nil)
         statusItem?.menu = nil
@@ -100,6 +137,13 @@ final class MenuBarController: NSObject {
         menu.addItem(log)
 
         menu.addItem(.separator())
+
+        if let balance = balanceText {
+            let item = NSMenuItem(title: "余额: \(balance)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
 
         let quit = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
