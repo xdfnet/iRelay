@@ -23,6 +23,8 @@ final class RelayState: ObservableObject {
         didSet { UserDefaults.standard.set(codexEnabled, forKey: Self.codexKey) }
     }
     var upstream: String = "https://api.deepseek.com"
+    /// 数据流活跃状态变化回调（供 NSStatusItem 更新图标）
+    var onActivityChanged: (() -> Void)?
 
     private static let keychainKey = "irelay_apiKey"
     static let modelKey = "irelay_model"
@@ -46,7 +48,7 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.1.9"
+    static let version = "2.1.10"
 
     /// 实时读文件判断补丁状态
     var isCodexPatched: Bool { codexConfigManager.isPatched }
@@ -83,11 +85,13 @@ final class RelayState: ObservableObject {
         h.onRequestActive = { [weak self] in
             Task { @MainActor in
                 self?.activeRequestCount += 1
+                self?.onActivityChanged?()
             }
         }
         h.onRequestInactive = { [weak self] in
             Task { @MainActor in
                 self?.activeRequestCount = max(0, (self?.activeRequestCount ?? 0) - 1)
+                self?.onActivityChanged?()
             }
         }
         handler = h

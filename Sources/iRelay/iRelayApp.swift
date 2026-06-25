@@ -4,56 +4,28 @@ import iRelayCore
 
 @main
 struct iRelayApp: App {
-    @StateObject private var state = RelayState()
-
-    init() {
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.accessory)
-        }
-    }
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarView(state: state)
-        } label: {
-            MenuBarIcon(codexEnabled: state.codexEnabled, isActive: state.activeRequestCount > 0)
+        WindowGroup {
+            Color.clear.frame(width: 0, height: 0).hidden()
         }
-        .menuBarExtraStyle(.menu)
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultSize(width: 0, height: 0)
     }
 }
 
-// MARK: - 菜单栏图标（支持闪烁）
+// MARK: - App Delegate
 
-struct MenuBarIcon: View {
-    let codexEnabled: Bool
-    let isActive: Bool
-    @State private var showFilled = true
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let state = RelayState()
+    private var menuBarController: MenuBarController?
 
-    init(codexEnabled: Bool, isActive: Bool) {
-        self.codexEnabled = codexEnabled
-        self.isActive = isActive
-    }
-
-    var iconName: String {
-        guard codexEnabled else { return "antenna.radiowaves.left.and.right.slash.circle.fill" }
-        guard isActive else { return "antenna.radiowaves.left.and.right.circle.fill" }
-        return showFilled
-            ? "antenna.radiowaves.left.and.right.circle.fill"
-            : "antenna.radiowaves.left.and.right.circle"
-    }
-
-    var body: some View {
-        Image(systemName: iconName)
-            .task(id: isActive) {
-                guard isActive else {
-                    showFilled = true
-                    return
-                }
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    showFilled.toggle()
-                }
-            }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        menuBarController = MenuBarController(state: state)
     }
 }
 
@@ -63,8 +35,6 @@ struct MenuBarIcon: View {
 func openApiKeyConfig(state: RelayState) {
     ApiKeyConfigWindow.shared.present(state: state)
 }
-
-// MARK: - Forms
 
 struct ApiKeyFormView: View {
     @State private var keyInput = ""
@@ -102,9 +72,6 @@ struct ApiKeyFormView: View {
     }
 }
 
-
-// MARK: - 窗口控制器
-
 @MainActor
 final class ApiKeyConfigWindow: NSWindowController {
     static let shared = ApiKeyConfigWindow()
@@ -136,4 +103,3 @@ final class ApiKeyConfigWindow: NSWindowController {
 
     func dismiss() { window?.close() }
 }
-

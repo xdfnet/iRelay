@@ -71,7 +71,7 @@ open iRelay.app               # 启动
 ## 架构
 
 ```
-MenuBarExtra (SwiftUI)
+NSStatusItem (AppKit)
   ├─ 开启/关闭代理 / 开启/关闭补丁 / 配置 / 退出
   ├─ RelayState     — 全局状态（apiKey / model / thinking / isCodexPatched）
   │   └─ UserDefaults 持久化 + 模型列表缓存
@@ -92,8 +92,8 @@ MenuBarExtra (SwiftUI)
 
 ```
 Sources/iRelay/
-├── iRelayApp.swift              # @main 入口，MenuBarExtra + Key 配置窗口
-├── MenuBarView.swift            # 菜单栏下拉 UI（模型/模式/配置/退出）
+├── iRelayApp.swift              # @main 入口，API Key 配置窗口
+├── MenuBarController.swift      # NSStatusItem 菜单栏（代理/补丁/配置）
 ├── Models/
 │   └── RelayState.swift         # @Observable 全局状态
 ├── Services/
