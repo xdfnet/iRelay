@@ -161,7 +161,7 @@ final class CodexConfigManager {
                 ["effort": "high", "description": "深度推理"],
                 ["effort": "xhigh", "description": "极深推理"]
             ],
-            "default_reasoning_level": "none",
+            "default_reasoning_level": "medium",
             "shell_type": "shell_command",
             "visibility": "list",
             "supported_in_api": true,

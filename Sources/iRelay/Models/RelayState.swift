@@ -46,7 +46,7 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.1.7"
+    static let version = "2.1.8"
 
     /// 实时读文件判断补丁状态
     var isCodexPatched: Bool { codexConfigManager.isPatched }
