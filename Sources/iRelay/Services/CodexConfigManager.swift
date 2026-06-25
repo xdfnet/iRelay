@@ -159,7 +159,8 @@ final class CodexConfigManager {
                 ["effort": "low", "description": "快速响应"],
                 ["effort": "medium", "description": "平衡速度与深度"],
                 ["effort": "high", "description": "深度推理"],
-                ["effort": "xhigh", "description": "极深推理"]
+                ["effort": "xhigh", "description": "极深推理"],
+                ["effort": "ultra", "description": "智能协作"]
             ],
             "default_reasoning_level": "medium",
             "shell_type": "shell_command",
