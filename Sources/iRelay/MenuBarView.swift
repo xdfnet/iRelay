@@ -5,7 +5,7 @@ struct MenuBarView: View {
     @ObservedObject var state: RelayState
 
     var body: some View {
-        Button(state.codexEnabled ? "关闭集成" : "开启集成") {
+        Button(state.codexEnabled ? "关闭代理" : "开启代理") {
             state.toggleCodex()
         }
 
