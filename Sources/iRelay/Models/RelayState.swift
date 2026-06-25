@@ -50,7 +50,7 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.1.5"
+    static let version = "2.1.6"
     @Published var isCodexPatched: Bool
 
     init() {

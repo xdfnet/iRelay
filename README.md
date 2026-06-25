@@ -72,7 +72,7 @@ open iRelay.app               # 启动
 
 ```
 MenuBarExtra (SwiftUI)
-  ├─ 开启/关闭代理 / 开启/关闭补丁 / 推理模式 / 配置 / 退出
+  ├─ 开启/关闭代理 / 开启/关闭补丁 / 开启/关闭推理 / 配置 / 退出
   ├─ RelayState     — 全局状态（apiKey / model / thinking / isCodexPatched）
   │   └─ UserDefaults 持久化 + 模型列表缓存
   ├─ CodexConfigManager — ~/.codex/config.toml

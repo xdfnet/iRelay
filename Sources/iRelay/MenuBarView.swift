@@ -20,13 +20,7 @@ struct MenuBarView: View {
         Button {
             state.setThinking(!state.thinkingEnabled)
         } label: {
-            HStack {
-                Text(verbatim: "推理模式")
-                Spacer()
-                if state.thinkingEnabled {
-                    Image(systemName: "checkmark")
-                }
-            }
+            Text(verbatim: state.thinkingEnabled ? "关闭推理" : "开启推理")
         }
 
         Divider()
