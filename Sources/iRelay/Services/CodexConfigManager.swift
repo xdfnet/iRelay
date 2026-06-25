@@ -22,13 +22,6 @@ final class CodexConfigManager {
 
     @discardableResult
     func enable(model: String, port: UInt16) -> Bool {
-        // 1. 备份 + 打补丁
-        guard patchAppAsar() else {
-            Log.error("codex_config_enable_failed", "reason", "asar_patch_failed")
-            return false
-        }
-
-        // 2. 写配置，失败则从备份还原 asar
         let raw = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
         let next = configureCodexTOML(raw, model: model, port: port)
         do {
@@ -37,21 +30,13 @@ final class CodexConfigManager {
             try next.write(to: configPath, atomically: true, encoding: .utf8)
             return true
         } catch {
-            Log.error("codex_config_enable_failed", "reason", "config_write_failed", "rollback", "asar")
-            appPatcher.restoreFromBackup()
+            Log.error("codex_config_enable_failed", "reason", "config_write_failed")
             return false
         }
     }
 
     @discardableResult
     func disable() -> Bool {
-        // 1. 从备份还原 asar
-        guard appPatcher.restoreFromBackup() else {
-            Log.error("codex_config_disable_failed", "reason", "asar_restore_failed")
-            return false
-        }
-
-        // 2. 清配置
         if let raw = try? String(contentsOf: configPath, encoding: .utf8) {
             let next = disableCodexTOML(raw)
             try? next.write(to: configPath, atomically: true, encoding: .utf8)
@@ -60,8 +45,22 @@ final class CodexConfigManager {
         return true
     }
 
+    /// 是否已打补丁
+    var isPatched: Bool { appPatcher.isPatched }
+
+    /// 打补丁（先检查权限）
     @discardableResult
-    func patchAppAsar() -> Bool { appPatcher.ensurePatched() }
+    func patchAppAsar() -> Bool {
+        guard appPatcher.ensurePermission() else { return false }
+        return appPatcher.ensurePatched()
+    }
+
+    /// 还原补丁（先检查权限）
+    @discardableResult
+    func restoreAppAsar() -> Bool {
+        guard appPatcher.ensurePermission() else { return false }
+        return appPatcher.restoreFromBackup()
+    }
 
     // MARK: - TOML
 

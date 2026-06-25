@@ -5,8 +5,14 @@ struct MenuBarView: View {
     @ObservedObject var state: RelayState
 
     var body: some View {
-        Button(state.codexEnabled ? "关闭 Codex 集成" : "开启 Codex 集成") {
+        Button(state.codexEnabled ? "关闭集成" : "开启集成") {
             state.toggleCodex()
+        }
+
+        Button {
+            state.toggleCodexAsar()
+        } label: {
+            Text(verbatim: state.isCodexPatched ? "关闭补丁" : "开启补丁")
         }
 
         Divider()

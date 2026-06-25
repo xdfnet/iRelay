@@ -50,13 +50,15 @@ final class RelayState: ObservableObject {
     }
 
     let codexConfigManager = CodexConfigManager()
-    static let version = "2.1.4"
+    static let version = "2.1.5"
+    @Published var isCodexPatched: Bool
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Self.keychainKey) ?? ""
         model = UserDefaults.standard.string(forKey: Self.modelKey) ?? "deepseek-v4-pro"
         thinkingEnabled = UserDefaults.standard.object(forKey: Self.thinkingKey) as? Bool ?? true
         codexEnabled = UserDefaults.standard.object(forKey: Self.codexKey) as? Bool ?? true
+        isCodexPatched = codexConfigManager.isPatched
 
         turnOn(model: model)
     }
@@ -146,6 +148,25 @@ final class RelayState: ObservableObject {
             model = "deepseek-v4-pro"
             codexEnabled = true
             syncCodexConfig()
+        }
+    }
+
+    /// 切换补丁状态：已打→还原，未打→打补丁
+    func toggleCodexAsar() {
+        if codexConfigManager.isPatched {
+            guard codexConfigManager.restoreAppAsar() else {
+                Log.error("codex_asar_restore_failed")
+                return
+            }
+            isCodexPatched = false
+            Log.info("codex_asar_restored")
+        } else {
+            guard codexConfigManager.patchAppAsar() else {
+                Log.error("codex_asar_patch_failed")
+                return
+            }
+            isCodexPatched = true
+            Log.info("codex_asar_patched")
         }
     }
 

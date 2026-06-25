@@ -13,13 +13,14 @@
 
 | 功能 | 说明 |
 |------|------|
-| 一键集成 | 开启后自动配置 Codex 使用 iRelay 中转，默认使用 DeepSeek V4 Pro |
+| 集成开关 | 配置 Codex 使用 iRelay 中转，默认使用 DeepSeek V4 Pro |
+| 补丁开关 | 独立修补 Codex 桌面版模型白名单过滤，与集成解耦 |
+| 权限检查 | 操作前检测 App 管理权限，未授权弹窗引导 |
 | 数据流指示 | 菜单栏图标在有请求流经时闪烁，实时反映中转服务活跃状态 |
 | 思考模式 | 一键开关 DeepSeek 推理模式 |
 | API Key | 窗口配置 DeepSeek API Key |
 | 端口固定 | 固定 `8787`，即开即用 |
 | 模型元数据 | 自动为 Codex 提供完整模型信息，消除 fallback 警告 |
-| Codex App 适配 | 自动修补桌面版模型白名单过滤，让 DeepSeek 模型可用 |
 | Chat 透传 | 额外提供 `/v1/chat/completions` 直通接口 |
 
 ## 要求
@@ -58,9 +59,10 @@ open iRelay.app               # 启动
 
 ## 使用
 
-1. 启动 iRelay，点击菜单栏图标 → **配置 → API 密钥** → 输入 DeepSeek API Key
-2. 点击菜单栏图标 → **开启 Codex 集成** → 自动完成补丁 + 配置
-3. 开关思考模式、关闭集成等均在菜单栏操作
+1. 启动 iRelay，点击菜单栏图标 → **设置密钥** → 输入 DeepSeek API Key
+2. 点击 **开启补丁** → 授权 App 管理权限 → 修补 Codex 模型白名单
+3. 点击 **开启集成** → 配置 Codex 使用 iRelay 中转
+4. 开关思考模式、关闭集成/补丁等均在菜单栏操作
 
 首次使用后重启 Codex，它会自动从 iRelay 获取模型列表。
 
@@ -70,8 +72,8 @@ open iRelay.app               # 启动
 
 ```
 MenuBarExtra (SwiftUI)
-  ├─ 开启/关闭集成 / 推理模式 / 配置 / 退出
-  ├─ RelayState     — 全局状态（apiKey / model / thinking）
+  ├─ 开启/关闭集成 / 开启/关闭补丁 / 推理模式 / 配置 / 退出
+  ├─ RelayState     — 全局状态（apiKey / model / thinking / isCodexPatched）
   │   └─ UserDefaults 持久化 + 模型列表缓存
   ├─ CodexConfigManager — ~/.codex/config.toml
   │   ├─ 写入 model_catalog_json，让 Codex 正确识别 DeepSeek 模型
@@ -107,15 +109,11 @@ Sources/iRelay/
 
 Codex 桌面 App 前端会读取远端 Statsig 模型白名单。某些版本中白名单只包含 `gpt-*` 模型，并启用了 `use_hidden_models`，导致 iRelay 提供的 `deepseek-v4-pro` / `deepseek-v4-flash` 被过滤，模型菜单显示为空。
 
-iRelay 配 Key 或切换模型时会自动检测并修补：
-
-```text
-/Applications/Codex.app/Contents/Resources/app.asar
-```
+iRelay 提供独立的「开启补丁/关闭补丁」菜单项，修补 Codex 桌面版前会先检测 `App 管理`权限，未授权则弹窗引导。
 
 补丁方式是等长替换前端过滤表达式，避免依赖 `npx asar` 或其他外部工具。每次修补前会重新备份（删旧→建新），保证备份始终对应当前 Codex 版本。
 
-关闭 iRelay 模型提供时从备份恢复，并删除备份文件。Codex App 自动更新后，下次启用 iRelay 时会重建最新备份再打补丁。
+补丁与集成完全解耦：关闭集成不会还原补丁，关闭补丁也不会影响集成配置。
 
 ## 许可证
 
