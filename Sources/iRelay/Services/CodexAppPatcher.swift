@@ -6,8 +6,9 @@ import iRelayCore
 final class CodexAppPatcher {
     private let asar = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar")
     private let backup = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/app.asar.bak")
-    private let original = Data("s?t.has(n.model):!n.hidden".utf8)
-    private let patched  = Data("s?!n.hidden     :!n.hidden".utf8)
+    /// 注意：Codex 每次升级可能改变 minifier 变量名（s→l 等），若失效需同步更新
+    private let original = Data("l?t.has(n.model):!n.hidden".utf8)
+    private let patched  = Data("l?!n.hidden     :!n.hidden".utf8)
 
     /// 检测是否已打补丁（不修改文件）
     var isPatched: Bool {

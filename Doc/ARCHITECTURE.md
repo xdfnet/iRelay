@@ -1,6 +1,6 @@
 # iRelay 架构文档
 
-> 版本 2.1.0 · macOS 菜单栏应用 · Zero external dependencies
+> 版本 2.1.12 · macOS 菜单栏应用 · Zero external dependencies
 
 ---
 

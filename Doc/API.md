@@ -1,6 +1,6 @@
 # iRelay API 文档
 
-> 版本 2.1.0 · 基础 URL: `http://localhost:8787`
+> 版本 2.1.12 · 基础 URL: `http://localhost:8787`
 
 iRelay 是一个运行在 macOS 菜单栏的中继代理，将 Codex 的 Responses API 转换为 DeepSeek 的 Chat Completions API，同时提供 Chat Completions 直通接口。
 
